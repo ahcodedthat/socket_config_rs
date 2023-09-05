@@ -1,0 +1,21 @@
+all-features = true
+
+[licenses]
+unlicensed = "deny"
+copyleft = "deny"
+allow-osi-fsf-free = "either"
+default = "deny"
+
+[licenses.private]
+ignore = false
+
+[bans]
+deny = [
+	# These versions of `serde_derive` contain a pre-compiled binary of uncertain provenance. Best to exclude it.
+	{ name = "serde_derive", version = ">=1.0.172, <=1.0.183" },
+]
+
+skip-tree = [
+	# This version of `derive_more` brings in an old version of `syn`. Unfortunately, `derive_more` hasn't seen a release in a long time, so we're just going to have to live with that and exclude it from duplicate detection.
+	{ name = "derive_more", version = "=0.99.17" },
+]
