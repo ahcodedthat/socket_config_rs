@@ -16,7 +16,6 @@
 //! This library is based on [`socket2`], and should work on any platform that `socket2` works on, which as of this writing is Unix-like platforms and Windows. If a future version of `socket2` is ported to another platform (such as WASI), this library should work on such platforms as well.
 //!
 //! Some items in this crate are limited in which platforms they're available on, or behave differently on different platforms, or are only available if a particular feature flag is enabled. Such differences are noted with an “Availability” section in those items' documentation.
-
 #![cfg_attr(all(
 	feature = "clap",
 	feature = "futures",
@@ -33,6 +32,12 @@ This library has the following feature flags:
 * `serde`: Support parsing socket options from configuration files or environment variables using [`serde`]. Specifically, this adds an implementation of [`serde::Deserialize`] to [`SocketAddr`] and [`SocketUserOptions`].
 * `tokio`: Adds the utility types [`AnyTokioListener`][crate::convert::AnyTokioListener] and [`AnyTokioStream`][crate::convert::AnyTokioStream].
 "#)]
+//!
+//!
+//! # Related libraries
+//!
+//! * [`socket2`]: Basis of this library.
+//! * [`tokio_listener`](https://crates.io/crates/tokio-listener): Inspired this library. This library has largely the same purpose as `tokio_listener`, but uses a different approach.
 
 #![allow(clippy::tabs_in_doc_comments)] // This project uses tabs for indentation throughout, including in documentation examples.
 
