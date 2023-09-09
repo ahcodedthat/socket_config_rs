@@ -7,21 +7,24 @@ use pin_project::pin_project;
 use socket2::{SockAddr, Socket};
 use std::{
 	io,
-	path::Path,
 	pin::Pin,
 	task,
 };
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+#[cfg(unix)]
+use std::path::Path;
+
 cfg_if! {
 	if #[cfg(windows)] {
-		compile_error!("implement `AsSocket` and `AsRawSocket` for everything");
+		use std::os::windows::io::{AsRawSocket, AsSocket, BorrowedSocket, RawSocket};
 	}
 	else {
 		use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 	}
 }
 
+#[cfg(unix)]
 fn unix_sockaddr_into(addr: tokio::net::unix::SocketAddr) -> SockAddr {
 	let pathname =
 		addr.as_pathname()
@@ -224,6 +227,24 @@ impl AsRawFd for AnyTokioListener {
 	}
 }
 
+#[cfg(windows)]
+impl AsRawSocket for AnyTokioListener {
+	fn as_raw_socket(&self) -> RawSocket {
+		match self {
+			Self::Tcp(l) => l.as_raw_socket(),
+		}
+	}
+}
+
+#[cfg(windows)]
+impl AsSocket for AnyTokioListener {
+	fn as_socket(&self) -> BorrowedSocket {
+		match self {
+			Self::Tcp(l) => l.as_socket(),
+		}
+	}
+}
+
 /// A connected [stream-type][socket2::Type::STREAM] socket, either TCP or Unix-domain, adapted for use with [`tokio`].
 ///
 /// `AnyTokioStream`s are usually obtained from a call to [`AnyTokioListener::accept`]. This type implements [`AsyncRead`] and [`AsyncWrite`], and is used to communicate with the connected peer in much the same way as a [`tokio::net::TcpStream`].
@@ -410,6 +431,24 @@ impl AsRawFd for AnyTokioStream {
 		match self {
 			Self::Tcp(s) => s.as_raw_fd(),
 			#[cfg(unix)] Self::Unix(s) => s.as_raw_fd(),
+		}
+	}
+}
+
+#[cfg(windows)]
+impl AsRawSocket for AnyTokioStream {
+	fn as_raw_socket(&self) -> RawSocket {
+		match self {
+			Self::Tcp(s) => s.as_raw_socket(),
+		}
+	}
+}
+
+#[cfg(windows)]
+impl AsSocket for AnyTokioStream {
+	fn as_socket(&self) -> BorrowedSocket {
+		match self {
+			Self::Tcp(s) => s.as_socket(),
 		}
 	}
 }

@@ -33,7 +33,7 @@ fn inherit() {
 	socket.listen(128).unwrap();
 
 	let socket_addr: socket2::SockAddr = socket.local_addr().unwrap();
-	let socket_handle = socket_config::make_socket_inheritable(&socket).unwrap();
+	let socket_handle = socket_config::make_socket_inheritable(&socket, true).unwrap();
 
 	let child_process = KillOnDrop(
 		CargoBuild::new()

@@ -87,6 +87,20 @@ pub enum OpenSocketError {
 	#[non_exhaustive]
 	SystemdFdNotSupported,
 
+	/// There was an error getting the standard input handle.
+	/// 
+	/// # Availability
+	/// 
+	/// Windows only. On all other platforms, getting the standard input handle never fails.
+	#[cfg(windows)]
+	#[error("couldn't get standard input handle: {error}")]
+	#[non_exhaustive]
+	WindowsGetStdin {
+		/// The error that this one arose from.
+		#[source]
+		error: io::Error,
+	},
+
 	/// The [`SocketAddr`] specifies a socket inherited from the parent process (including systemd socket activation), but while the socket does exist, it has the wrong type.
 	#[error("inherited socket has wrong type (expected `{expected:?}`; got `{actual:?}`)")]
 	#[non_exhaustive]
@@ -122,6 +136,11 @@ pub enum OpenSocketError {
 	},
 
 	/// [`SocketUserOptions::unix_socket_owner`] was used, but the named user could not be looked up.
+	///
+	/// # Availability
+	///
+	/// Unix-like platforms only.
+	#[cfg(unix)]
 	#[error("the `unix_socket_owner` option was used, but there was an error looking up the user ID: {error}")]
 	#[non_exhaustive]
 	LookupOwner {
@@ -131,11 +150,21 @@ pub enum OpenSocketError {
 	},
 
 	/// [`SocketUserOptions::unix_socket_owner`] was used, but no user with that name was found.
+	///
+	/// # Availability
+	///
+	/// Unix-like platforms only.
+	#[cfg(unix)]
 	#[error("the `unix_socket_owner` option was used, but no user with that name was found")]
 	#[non_exhaustive]
 	OwnerNotFound,
 
 	/// [`SocketUserOptions::unix_socket_group`] was used, but the named group could not be looked up.
+	///
+	/// # Availability
+	///
+	/// Unix-like platforms only.
+	#[cfg(unix)]
 	#[error("the `unix_socket_group` option was used, but there was an error looking up the group ID: {error}")]
 	#[non_exhaustive]
 	LookupUnixGroup {
@@ -145,6 +174,11 @@ pub enum OpenSocketError {
 	},
 
 	/// [`SocketUserOptions::unix_socket_group`] was used, but no group with that name was found.
+	///
+	/// # Availability
+	///
+	/// Unix-like platforms only.
+	#[cfg(unix)]
 	#[error("the `unix_socket_group` option was used, but no group with that name was found")]
 	#[non_exhaustive]
 	UnixGroupNotFound,
@@ -253,15 +287,11 @@ impl From<OpenSocketError> for io::Error {
 			OpenSocketError::InheritWrongType { .. }       => EK::InvalidData ,
 			OpenSocketError::AlreadyInherited              => EK::AddrInUse   ,
 			OpenSocketError::UnsupportedUserOption { .. }  => EK::Unsupported ,
-			OpenSocketError::OwnerNotFound                 => EK::NotFound    ,
-			OpenSocketError::UnixGroupNotFound             => EK::NotFound    ,
 			OpenSocketError::InapplicableUserOption { .. } => EK::InvalidInput,
 			OpenSocketError::InheritedIsListening          => EK::InvalidData ,
 			OpenSocketError::InheritedIsNotListening       => EK::InvalidData ,
 
 			| OpenSocketError::InvalidUnixPath { error }
-			| OpenSocketError::LookupOwner { error }
-			| OpenSocketError::LookupUnixGroup { error }
 			| OpenSocketError::CreateSocket { error }
 			| OpenSocketError::MkdirParents { error }
 			| OpenSocketError::BeforeBind(error)
@@ -276,6 +306,19 @@ impl From<OpenSocketError> for io::Error {
 			)
 			| OpenSocketError::SetSockOpt { error, .. }
 			=> error.kind(),
+
+			#[cfg(windows)]
+			OpenSocketError::WindowsGetStdin { error } => error.kind(),
+
+			#[cfg(unix)]
+			| OpenSocketError::OwnerNotFound
+			| OpenSocketError::UnixGroupNotFound
+			=> EK::NotFound,
+
+			#[cfg(unix)]
+			| OpenSocketError::LookupOwner { error }
+			| OpenSocketError::LookupUnixGroup { error }
+			=> error.kind(),
 		};
 
 		io::Error::new(kind, error)
@@ -286,7 +329,7 @@ impl From<OpenSocketError> for io::Error {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CleanupSocketError {
-	/// The socket is a path-based Unix-domain socket, but [`std::fs::symlink_metadata`] reported an error checking for a stale socket.
+	/// The socket is a path-based Unix-domain socket, but [`std::fs::symlink_metadata`] (or the Windows equivalent) reported an error checking for a stale socket.
 	#[error("couldn't check for a stale Unix-domain socket: {error}")]
 	#[non_exhaustive]
 	Stat {
@@ -335,7 +378,7 @@ pub enum IntoTokioError {
 		if {
 			let local_addr = socket.local_addr().ok();
 			let domain = local_addr.map(|a| a.domain());
-			domain == socket2::Domain::UNIX
+			domain == Some(socket2::Domain::UNIX)
 		}
 		=> "Unix-domain sockets are not yet supported on Windows",
 

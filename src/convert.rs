@@ -4,6 +4,22 @@ use cfg_if::cfg_if;
 use socket2::Socket;
 use std::io;
 
+#[cfg(windows)]
+use {
+	std::{
+		ffi::c_int,
+		mem,
+		os::windows::io::AsRawSocket,
+	},
+	windows_sys::Win32::Networking::WinSock::{
+		getsockopt,
+		SO_ACCEPTCONN,
+		SO_PROTOCOL_INFOW,
+		SOL_SOCKET,
+		WSAPROTOCOL_INFOW,
+	},
+};
+
 cfg_if! {
 	if #[cfg(feature = "tokio")] {
 		mod tokio;
@@ -133,7 +149,58 @@ impl TryFrom<Socket> for AnyStdSocket {
 
 		cfg_if! {
 			if #[cfg(windows)] {
-				compile_error!("implement this using Win32 `SO_PROTOCOL_INFO` and `SO_ACCEPTCONN`");
+				let mut protocol_info: WSAPROTOCOL_INFOW = unsafe {
+					// Safety: all zeroes is a valid instance of the `WSAPROTOCOL_INFOW` type.
+					mem::zeroed()
+				};
+
+				let mut protocol_info_len: c_int = mem::size_of_val(&protocol_info).try_into().unwrap();
+
+				let getsockopt_result = unsafe {
+					// Safety:
+					//
+					// * `socket.as_raw_socket()` is a valid socket handle.
+					// * `SOL_SOCKET` AND `SO_PROTOCOL_INFOW` are a valid socket option level and socket option in that level, respectively.
+					// * `protocol_info` is a valid `WSAPROTOCOL_INFOW`, which is the data type that `SO_PROTOCOL_INFOW` expects a pointer to, and `protocol_info_len` is its length.
+					getsockopt(
+						socket.as_raw_socket() as _,
+						SOL_SOCKET,
+						SO_PROTOCOL_INFOW,
+						&mut protocol_info as *mut WSAPROTOCOL_INFOW as *mut _,
+						&mut protocol_info_len,
+					)
+				};
+
+				if getsockopt_result != 0 {
+					return Err(io::Error::last_os_error());
+				}
+
+				r#type = socket2::Type::from(protocol_info.iSocketType);
+				protocol = Some(socket2::Protocol::from(protocol_info.iProtocol));
+
+				let mut is_listening_dword: u32 = 0;
+				let mut is_listening_dword_len: c_int = mem::size_of_val(&is_listening_dword).try_into().unwrap();
+
+				let getsockopt_result = unsafe {
+					// Safety:
+					//
+					// * `socket.as_raw_socket()` is a valid socket handle.
+					// * `SOL_SOCKET` AND `SO_ACCEPTCONN` are a valid socket option level and socket option in that level, respectively.
+					// * `is_listening_dword` is a valid `DWORD`, which is the data type that `SO_ACCEPTCONN` expects a pointer to, and `is_listening_dword_len` is its length.
+					getsockopt(
+						socket.as_raw_socket() as _,
+						SOL_SOCKET,
+						SO_ACCEPTCONN,
+						&mut is_listening_dword as *mut u32 as *mut _,
+						&mut is_listening_dword_len,
+					)
+				};
+
+				if getsockopt_result != 0 {
+					return Err(io::Error::last_os_error());
+				}
+
+				is_listening = Some(is_listening_dword != 0);
 			}
 			else {
 				r#type = socket.r#type()?;

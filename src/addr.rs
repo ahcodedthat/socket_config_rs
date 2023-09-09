@@ -1,7 +1,9 @@
-use cfg_if::cfg_if;
-use crate::errors::{
-	CleanupSocketError,
-	InvalidSocketAddrError,
+use crate::{
+	errors::{
+		CleanupSocketError,
+		InvalidSocketAddrError,
+	},
+	RawSocket,
 };
 use std::{
 	fmt::{self, Display, Formatter},
@@ -14,17 +16,8 @@ use std::{
 #[cfg(doc)]
 use crate::convert::AnyStdSocket;
 
-#[cfg(unix)]
-use std::os::unix::fs::FileTypeExt;
-
-cfg_if! {
-	if #[cfg(any(unix, target_os = "wasi"))] {
-		pub(crate) use std::os::fd::RawFd as RawSocket;
-	}
-	else {
-		pub(crate) use std::os::windows::io::RawSocket;
-	}
-}
+#[cfg(any(unix, windows))]
+use crate::is_unix_socket;
 
 /// The address to bind a socket to, or a description of an inherited socket to use. This is one of the three parameters to [`open`][crate::open()].
 ///
@@ -287,35 +280,25 @@ impl Display for SocketAddr {
 
 #[cfg(any(unix, windows))]
 pub(crate) fn cleanup_unix_path_socket(path: &Path) -> Result<(), CleanupSocketError> {
-	cfg_if! {
-		if #[cfg(windows)] {
-			compile_error!("need an implementation here")
-		}
-		else {
-			let done = Ok(());
-
-			let metadata: fs::Metadata = match fs::symlink_metadata(path) {
-				Ok(ok) => ok,
-
-				// If it doesn't exist, that's fine.
-				Err(error) if error.kind() == io::ErrorKind::NotFound => return done,
-
-				// If some other error occurs, report it.
-				Err(error) => return Err(CleanupSocketError::Stat { error }),
-			};
-
-			// If there's something other than a Unix-domain socket at that path, ignore it.
-			if !metadata.file_type().is_socket() {
-				return done;
+	let is_unix_socket: bool =
+		is_unix_socket(path)
+		.or_else(|error| {
+			// Treat a “not found” error as equivalent to `Ok(false)`.
+			if error.kind() == io::ErrorKind::NotFound {
+				Ok(false)
 			}
+			else {
+				Err(error)
+			}
+		})
+		.map_err(|error| CleanupSocketError::Stat { error })?;
 
-			// Try to remove the stale socket. If that fails with an error kind other than `NotFound`, report the error.
-			if let Err(error) = fs::remove_file(path) {
-			if error.kind() != io::ErrorKind::NotFound {
-				return Err(CleanupSocketError::Unlink { error });
-			}}
-
-			done
-		}
+	if is_unix_socket {
+		if let Err(error) = fs::remove_file(path) {
+		if error.kind() != io::ErrorKind::NotFound {
+			return Err(CleanupSocketError::Unlink { error });
+		}}
 	}
+
+	Ok(())
 }

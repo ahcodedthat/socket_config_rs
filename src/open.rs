@@ -6,6 +6,7 @@ use crate::{
 	SocketAppOptions,
 	SocketAddr,
 	SocketUserOptions,
+	startup_socket_api,
 };
 use once_cell::sync::Lazy;
 use socket2::Socket;
@@ -21,7 +22,14 @@ use crate::util::*;
 
 cfg_if! {
 	if #[cfg(windows)] {
-		use std::os::windows::io::FromRawSocket;
+		use std::{
+			io,
+			os::windows::io::FromRawSocket,
+		};
+		use windows_sys::Win32::{
+			Foundation::INVALID_HANDLE_VALUE,
+			System::Console::{GetStdHandle, STD_INPUT_HANDLE},
+		};
 	}
 	else {
 		use crate::systemd::*;
@@ -75,10 +83,15 @@ pub fn open(
 	app_options: &SocketAppOptions,
 	user_options: &SocketUserOptions,
 ) -> Result<Socket, OpenSocketError> {
+	let orig_address = address;
+
 	let open_new = |address: socket2::SockAddr| -> Result<Socket, OpenSocketError> {
-		// Is this a path-based Unix-domain socket?
+		// Is this a path-based Unix-domain socket? (We can't use `socket2::SockAddr::as_pathname` here, because it isn't available on Windows.)
 		#[cfg(any(unix, windows))]
-		let unix_socket_path: Option<&Path> = address.as_pathname();
+		let unix_socket_path: Option<&Path> = match orig_address {
+			SocketAddr::Unix { path } => Some(path),
+			_ => None,
+		};
 
 		// Prepare any Unix security attributes, if relevant.
 		#[cfg(unix)]
@@ -166,6 +179,8 @@ pub fn open(
 	};
 
 	let inherit = |socket: RawSocket| -> Result<Socket, OpenSocketError> {
+		startup_socket_api();
+
 		#[cfg(unix)] {
 			check_inapplicable(user_options.unix_socket_permissions.as_ref(), "unix_socket_permissions")?;
 			check_inapplicable(user_options.unix_socket_owner.as_ref(), "unix_socket_owner")?;
@@ -240,7 +255,18 @@ pub fn open(
 			let socket: RawSocket = {
 				cfg_if! {
 					if #[cfg(windows)] {
-						compile_error!("need an implementation here")
+						let maybe_socket = unsafe {
+							// Safety: `STD_INPUT_HANDLE` is a valid standard device identifier.
+							GetStdHandle(STD_INPUT_HANDLE)
+						};
+
+						if maybe_socket == INVALID_HANDLE_VALUE {
+							return Err(OpenSocketError::WindowsGetStdin {
+								error: io::Error::last_os_error(),
+							});
+						}
+
+						maybe_socket as RawSocket
 					}
 					else {
 						0
