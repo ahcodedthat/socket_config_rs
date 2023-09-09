@@ -88,14 +88,27 @@ pub enum OpenSocketError {
 	SystemdFdNotSupported,
 
 	/// There was an error getting the standard input handle.
-	/// 
+	///
 	/// # Availability
-	/// 
+	///
 	/// Windows only. On all other platforms, getting the standard input handle never fails.
 	#[cfg(windows)]
 	#[error("couldn't get standard input handle: {error}")]
 	#[non_exhaustive]
 	WindowsGetStdin {
+		/// The error that this one arose from.
+		#[source]
+		error: io::Error,
+	},
+
+	/// The [`SocketAddr`] specifies a socket inherited from the parent process (including systemd socket activation), but there was an error in getting the inherited socket.
+	///
+	/// Specifically, the error was in trying to duplicate the socket (`dup` on Unix-like platforms; `WSADuplicateSocket` on Windows). (This library duplicates inherited sockets so that they can be [opened][crate::open()] more than once.)
+	///
+	/// If this error occurs, it probably means that the process didn't actually inherit any socket with that file descriptor or handle.
+	#[error("couldn't inherit socket: {error}")]
+	#[non_exhaustive]
+	DupInherited {
 		/// The error that this one arose from.
 		#[source]
 		error: io::Error,
@@ -111,13 +124,6 @@ pub enum OpenSocketError {
 		/// The type that the socket actually has.
 		actual: socket2::Type,
 	},
-
-	/// The [`SocketAddr`] specifies a socket inherited from the parent process (including systemd socket activation), but the specified inherited socket has already been claimed by a previous call to [`open`][open()].
-	///
-	/// This can happen if the user configures more than one socket (if that's possible in your application) and configures the same inherited socket more than once. This can also happen if the application attempts to call [`open`][open()] with the same `SocketAddr` twice.
-	#[error("this inherited socket is already in use")]
-	#[non_exhaustive]
-	AlreadyInherited,
 
 	/// A user option was used that is not supported on the current platform.
 	#[error("the `{name}` option is not supported on this platform")]
@@ -257,7 +263,9 @@ pub enum OpenSocketError {
 		error: io::Error,
 	},
 
-	/// [`socket2::Socket::type`] failed. This is usually caused by the inherited file descriptor/handle not existing or not being a socket.
+	/// [`socket2::Socket::type`] failed.
+	///
+	/// This will, in particular, happen if the file descriptor or handle exists but is not a socket.
 	#[error("couldn't check type of inherited socket: {error}")]
 	#[non_exhaustive]
 	CheckInheritedSocket {
@@ -285,13 +293,13 @@ impl From<OpenSocketError> for io::Error {
 			OpenSocketError::InvalidSystemdFd              => EK::NotFound    ,
 			OpenSocketError::SystemdFdNotSupported         => EK::Unsupported ,
 			OpenSocketError::InheritWrongType { .. }       => EK::InvalidData ,
-			OpenSocketError::AlreadyInherited              => EK::AddrInUse   ,
 			OpenSocketError::UnsupportedUserOption { .. }  => EK::Unsupported ,
 			OpenSocketError::InapplicableUserOption { .. } => EK::InvalidInput,
 			OpenSocketError::InheritedIsListening          => EK::InvalidData ,
 			OpenSocketError::InheritedIsNotListening       => EK::InvalidData ,
 
 			| OpenSocketError::InvalidUnixPath { error }
+			| OpenSocketError::DupInherited { error }
 			| OpenSocketError::CreateSocket { error }
 			| OpenSocketError::MkdirParents { error }
 			| OpenSocketError::BeforeBind(error)

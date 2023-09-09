@@ -8,13 +8,10 @@ use crate::{
 	SocketUserOptions,
 	startup_socket_api,
 };
-use once_cell::sync::Lazy;
 use socket2::Socket;
 use std::{
-	collections::HashSet,
 	fs,
 	path::Path,
-	sync::Mutex,
 };
 
 #[allow(unused)]
@@ -22,10 +19,7 @@ use crate::util::*;
 
 cfg_if! {
 	if #[cfg(windows)] {
-		use std::{
-			io,
-			os::windows::io::FromRawSocket,
-		};
+		use std::io;
 		use windows_sys::Win32::{
 			Foundation::INVALID_HANDLE_VALUE,
 			System::Console::{GetStdHandle, STD_INPUT_HANDLE},
@@ -33,7 +27,6 @@ cfg_if! {
 	}
 	else {
 		use crate::systemd::*;
-		use std::os::fd::FromRawFd;
 	}
 }
 
@@ -78,6 +71,13 @@ use crate::unix_security::PreparedUnixSecurityAttributes;
 /// # Ok(())
 /// # }
 /// ```
+///
+///
+/// # Inherited sockets
+///
+/// This function duplicates inherited sockets (`dup` on Unix-like platforms; `WSADuplicateSocket` on Windows), rather than directly wrapping them in `Socket`. The original inherited socket is not closed, even when the returned `Socket` is dropped.
+///
+/// That way, it is possible to open, close, and reopen the same `SocketAddr`, regardless of whether it is inherited. The original inherited socket is left open, and will simply be duplicated again.
 pub fn open(
 	address: &SocketAddr,
 	app_options: &SocketAppOptions,
@@ -191,21 +191,16 @@ pub fn open(
 		check_inapplicable_bool(user_options.ip_socket_v6_only, "ip_socket_v6_only")?;
 		check_inapplicable(user_options.listen_socket_backlog, "listen_socket_backlog")?;
 
-		if !INHERITED_SOCKETS.lock().unwrap().insert(socket) {
-			return Err(OpenSocketError::AlreadyInherited);
-		}
-
 		// Safety: Inherited socket file descriptors/handles are supplied by the user or by an operating system API. Either way, we assume they're valid.
-		let socket: Socket = unsafe {
-			cfg_if! {
-				if #[cfg(windows)] {
-					Socket::from_raw_socket(socket)
-				}
-				else {
-					Socket::from_raw_fd(socket)
-				}
-			}
+		let socket: BorrowedSocket<'_> = unsafe {
+			BorrowedSocket::borrow_raw(socket)
 		};
+
+		let socket: OwnedSocket =
+			socket.try_clone_to_owned()
+			.map_err(|error| OpenSocketError::DupInherited { error })?;
+
+		let socket: Socket = Socket::from(socket);
 
 		let actual_type: socket2::Type =
 			socket.r#type()
@@ -296,5 +291,3 @@ pub fn open(
 
 	Ok(socket)
 }
-
-static INHERITED_SOCKETS: Lazy<Mutex<HashSet<RawSocket>>> = Lazy::new(|| Mutex::new(HashSet::new()));

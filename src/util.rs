@@ -53,10 +53,14 @@ use {
 
 cfg_if! {
 	if #[cfg(windows)] {
-		pub(crate) use std::os::windows::io::RawSocket;
+		pub(crate) use std::os::windows::io::{BorrowedSocket, OwnedSocket, RawSocket};
 	}
 	else {
-		pub(crate) use std::os::fd::RawFd as RawSocket;
+		pub(crate) use std::os::fd::{
+			BorrowedFd as BorrowedSocket,
+			OwnedFd as OwnedSocket,
+			RawFd as RawSocket,
+		};
 	}
 }
 
@@ -98,7 +102,7 @@ pub(crate) fn check_inapplicable_bool(option: bool, name: &'static str) -> Resul
 }
 
 /// Mark a socket as inheritable (or not), so that a child process will (or will not) inherit it.
-/// 
+///
 /// If the `inheritable` parameter is true, the socket is made inheritable; otherwise, it is made non-inheritable.
 ///
 /// If this function is successful, the return value is the file descriptor or handle to pass to the child process.
@@ -152,17 +156,17 @@ pub fn make_socket_inheritable(
 }
 
 /// Checks whether the file at the given `path` is a Unix-domain socket.
-/// 
+///
 /// Unix-like platforms and Windows have very different ways of checking if a file is a Unix-domain socket. This utility function abstracts over those differences.
-/// 
-/// 
+///
+///
 /// # Errors
-/// 
-/// Any I/O error raised by the operating system call used to get the file's status (). If the error's [`std::io::Error::kind`] is [`std::io::ErrorKind::NotFound`], then there is no 
-/// 
-/// 
+///
+/// Any I/O error raised by the operating system call used to get the file's status (). If the error's [`std::io::Error::kind`] is [`std::io::ErrorKind::NotFound`], then there is no
+///
+///
 /// # Availability
-/// 
+///
 /// Unix-like platforms and Windows only.
 #[cfg(any(unix, windows))]
 pub fn is_unix_socket(path: &Path) -> io::Result<bool> {
@@ -277,12 +281,12 @@ pub(crate) static TEST_SCRATCH: Lazy<PathBuf> = Lazy::new(|| {
 });
 
 /// Utility function that triggers initialization the system socket API.
-/// 
-/// 
+///
+///
 /// # Availability
-/// 
+///
 /// All platforms, but this function does nothing except on Windows.
-/// 
+///
 /// On Windows, the socket API must be initialized before use, with the `WSAStartup` function. This utility function indirectly triggers a call to that function.
 #[cfg_attr(not(windows), inline(always))]
 pub(crate) fn startup_socket_api() {
