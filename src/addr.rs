@@ -153,17 +153,20 @@ impl SocketAddr {
 	/// This method does nothing if:
 	///
 	/// * `self` is not [`SocketAddr::Unix`],
-	/// * this is not a Unix-like platform, or
+	/// * this is neither a Unix-like platform nor Windows, or
 	/// * there is not a Unix-domain socket at `self.path`.
 	///
 	/// This method attempts to check if the file at `self.path` really is a Unix-domain socket before deleting it. This check is imperfect, however; it is possible for a Unix-domain socket to be replaced with some other kind of file after the check but before the deletion (a [TOCTTOU] issue).
 	///
-	/// This method unfortunately does not clean up Unix-domain sockets on Windows, because the Rust standard library does not offer any way to distinguish sockets from other kinds of files on that platform. A future version of this library may remove this limitation.
-	///
 	/// [TOCTTOU]: https://en.wikipedia.org/wiki/Time-of-check_to_time-of-use
+	///
+	///
+	/// # Availability
+	///
+	/// All platforms, but this method does nothing on platforms that are neither Unix-like nor Windows.
 	pub fn cleanup(&self) -> Result<(), CleanupSocketError> {
 		match self {
-			Self::Unix { path, .. } => cleanup_unix_path_socket(path),
+			#[cfg(any(unix, windows))] Self::Unix { path, .. } => cleanup_unix_path_socket(path),
 			_ => Ok(()),
 		}
 	}
