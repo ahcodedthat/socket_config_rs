@@ -2,13 +2,13 @@
 authors = ["ahcodedthat"]
 categories = ["command-line-interface", "config", "network-programming"]
 description = "Set up sockets according to command line option or configuration file"
-documentation = "https://docs.rs/socket-config"
+documentation = "https://docs.rs/socket_config"
 edition = "2021"
 include = ["/examples", "/src", "/tests"]
 keywords = ["config", "network", "socket", "socket-activation", "systemd"]
 license = "MIT"
-name = "socket-config"
-repository = "https://github.com/ahcodedthat/socket-config-rs"
+name = "socket_config"
+repository = "https://github.com/ahcodedthat/socket_config_rs"
 rust-version = "1.70"
 version = "0.1.0"
 

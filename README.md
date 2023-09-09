@@ -1,4 +1,4 @@
-# socket-config — Set up sockets according to command line option or configuration file
+# socket_config — Set up sockets according to command line option or configuration file
 
 This library sets up sockets in a way that can be controlled by the user of your application, such as through a command-line option or configuration file.
 
