@@ -2,7 +2,6 @@ use crate::{
 	convert::AnyStdSocket,
 	errors::IntoTokioError,
 };
-use cfg_if::cfg_if;
 use pin_project::pin_project;
 use socket2::{SockAddr, Socket};
 use std::{
@@ -15,14 +14,11 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 #[cfg(unix)]
 use std::path::Path;
 
-cfg_if! {
-	if #[cfg(windows)] {
-		use std::os::windows::io::{AsRawSocket, AsSocket, BorrowedSocket, RawSocket};
-	}
-	else {
-		use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
-	}
-}
+#[cfg(windows)]
+use std::os::windows::io::{AsRawSocket, AsSocket, BorrowedSocket, RawSocket};
+
+#[cfg(not(windows))]
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 
 #[cfg(unix)]
 fn unix_sockaddr_into(addr: tokio::net::unix::SocketAddr) -> SockAddr {

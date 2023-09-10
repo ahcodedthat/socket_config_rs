@@ -1,34 +1,20 @@
-use cfg_if::cfg_if;
 use crate::{
 	cleanup_unix_path_socket,
 	errors::OpenSocketError,
-	RawSocket,
 	SocketAppOptions,
 	SocketAddr,
 	SocketUserOptions,
-	startup_socket_api,
+	sys,
+	util::{
+		check_inapplicable,
+		check_inapplicable_bool,
+	},
 };
 use socket2::Socket;
 use std::{
 	fs,
 	path::Path,
 };
-
-#[allow(unused)]
-use crate::util::*;
-
-cfg_if! {
-	if #[cfg(windows)] {
-		use std::io;
-		use windows_sys::Win32::{
-			Foundation::INVALID_HANDLE_VALUE,
-			System::Console::{GetStdHandle, STD_INPUT_HANDLE},
-		};
-	}
-	else {
-		use crate::systemd::*;
-	}
-}
 
 #[cfg(unix)]
 use crate::unix_security::PreparedUnixSecurityAttributes;
@@ -87,7 +73,6 @@ pub fn open(
 
 	let open_new = |address: socket2::SockAddr| -> Result<Socket, OpenSocketError> {
 		// Is this a path-based Unix-domain socket? (We can't use `socket2::SockAddr::as_pathname` here, because it isn't available on Windows.)
-		#[cfg(any(unix, windows))]
 		let unix_socket_path: Option<&Path> = match orig_address {
 			SocketAddr::Unix { path } => Some(path),
 			_ => None,
@@ -117,7 +102,6 @@ pub fn open(
 			Socket::new(address.domain(), app_options.r#type, app_options.protocol)
 			.map_err(|error| OpenSocketError::CreateSocket { error })?;
 
-		#[cfg(any(unix, windows))]
 		if let Some(socket_path) = unix_socket_path {
 			// Clean up the previous socket, if desired and applicable.
 			if !user_options.unix_socket_no_unlink {
@@ -132,19 +116,14 @@ pub fn open(
 		}
 
 		// Set socket options.
+		#[cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))]
 		if user_options.ip_socket_reuse_port {
-		cfg_if! {
-			if #[cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))] {
-				socket.set_reuse_port(true)
-				.map_err(|error| OpenSocketError::SetSockOpt {
-					option: "SO_REUSEPORT",
-					error,
-				})?;
-			}
-			else {
-				return unsupported("ip_socket_reuse_port");
-			}
-		}}
+			socket.set_reuse_port(true)
+			.map_err(|error| OpenSocketError::SetSockOpt {
+				option: "SO_REUSEPORT",
+				error,
+			})?;
+		}
 
 		if user_options.ip_socket_v6_only {
 			socket.set_only_v6(true)
@@ -178,8 +157,8 @@ pub fn open(
 		Ok(socket)
 	};
 
-	let inherit = |socket: RawSocket| -> Result<Socket, OpenSocketError> {
-		startup_socket_api();
+	let inherit = |socket: sys::RawSocket| -> Result<Socket, OpenSocketError> {
+		sys::startup_socket_api();
 
 		#[cfg(unix)] {
 			check_inapplicable(user_options.unix_socket_permissions.as_ref(), "unix_socket_permissions")?;
@@ -192,11 +171,11 @@ pub fn open(
 		check_inapplicable(user_options.listen_socket_backlog, "listen_socket_backlog")?;
 
 		// Safety: Inherited socket file descriptors/handles are supplied by the user or by an operating system API. Either way, we assume they're valid.
-		let socket: BorrowedSocket<'_> = unsafe {
-			BorrowedSocket::borrow_raw(socket)
+		let socket: sys::BorrowedSocket<'_> = unsafe {
+			sys::BorrowedSocket::borrow_raw(socket)
 		};
 
-		let socket: OwnedSocket =
+		let socket: sys::OwnedSocket =
 			socket.try_clone_to_owned()
 			.map_err(|error| OpenSocketError::DupInherited { error })?;
 
@@ -247,27 +226,13 @@ pub fn open(
 		SocketAddr::Inherit { socket } => inherit(*socket)?,
 
 		SocketAddr::InheritStdin {} => {
-			let socket: RawSocket = {
-				cfg_if! {
-					if #[cfg(windows)] {
-						let maybe_socket = unsafe {
-							// Safety: `STD_INPUT_HANDLE` is a valid standard device identifier.
-							GetStdHandle(STD_INPUT_HANDLE)
-						};
-
-						if maybe_socket == INVALID_HANDLE_VALUE {
-							return Err(OpenSocketError::WindowsGetStdin {
-								error: io::Error::last_os_error(),
-							});
-						}
-
-						maybe_socket as RawSocket
-					}
-					else {
-						0
-					}
+			let socket: sys::RawSocket = sys::get_stdin_as_socket().map_err(|error| -> OpenSocketError {
+				match error {
+					// This can only fail on Windows.
+					#[cfg(windows)]
+					error @ std::io::Error { .. } => OpenSocketError::WindowsGetStdin { error },
 				}
-			};
+			})?;
 
 			inherit(socket)?
 		},
@@ -275,8 +240,8 @@ pub fn open(
 		#[cfg(not(windows))]
 		SocketAddr::SystemdNumeric { socket } => {
 			if
-				*socket >= SD_LISTEN_FDS_START ||
-				SD_LISTEN_FDS_END.is_some_and(|sd_listen_fds_end| *socket <= sd_listen_fds_end)
+				*socket >= sys::SD_LISTEN_FDS_START ||
+				sys::SD_LISTEN_FDS_END.is_some_and(|sd_listen_fds_end| *socket <= sd_listen_fds_end)
 			{
 				inherit(*socket)?
 			}
@@ -284,9 +249,6 @@ pub fn open(
 				return Err(OpenSocketError::InvalidSystemdFd)
 			}
 		},
-
-		#[cfg(windows)]
-		SocketAddr::SystemdNumeric { .. } => return Err(OpenSocketError::SystemdFdNotSupported),
 	};
 
 	Ok(socket)

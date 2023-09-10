@@ -26,7 +26,7 @@ pub struct SocketUserOptions {
 	///
 	/// # Availability
 	///
-	/// Unix-like platforms and Windows. Using this option on other platforms has no effect (but is not an error).
+	/// All platforms.
 	#[cfg_attr(feature = "clap", arg(long))]
 	pub unix_socket_no_unlink: bool,
 
@@ -73,7 +73,8 @@ pub struct SocketUserOptions {
 	///
 	/// # Availability
 	///
-	/// Unix-like platforms except Solaris and illumos. Using this option on other platforms is an error.
+	/// Unix-like platforms except Solaris and illumos (that is, `cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))`). Using this option on other platforms is an error.
+	#[cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))]
 	#[cfg_attr(feature = "clap", arg(long))]
 	pub ip_socket_reuse_port: bool,
 

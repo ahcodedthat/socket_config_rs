@@ -13,7 +13,7 @@
 //!
 //! # Feature flags and platform support
 //!
-//! This library is based on [`socket2`], and should work on any platform that `socket2` works on, which as of this writing is Unix-like platforms and Windows. If a future version of `socket2` is ported to another platform (such as WASI), this library should work on such platforms as well.
+//! This library is based on [`socket2`], and should work on any platform that `socket2` works on, which as of this writing is Unix-like platforms and Windows.
 //!
 //! Some items in this crate are limited in which platforms they're available on, or behave differently on different platforms, or are only available if a particular feature flag is enabled. Such differences are noted with an “Availability” section in those items' documentation.
 #![cfg_attr(all(
@@ -55,8 +55,14 @@ pub use self::{
 	util::*,
 };
 
-#[cfg(not(windows))]
-mod systemd;
-
 #[cfg(unix)]
 pub mod unix_security;
+
+cfg_if::cfg_if! {
+	if #[cfg(windows)] {
+		#[path = "sys/windows.rs"] mod sys;
+	}
+	else {
+		#[path = "sys/other.rs"] mod sys;
+	}
+}

@@ -18,7 +18,6 @@ const TEST_MSG_LEN: usize = 13;
 const TEST_MSG: &[u8; TEST_MSG_LEN] = b"Hello, world!";
 const TEST_MSG_MODIFIED: &[u8; TEST_MSG_LEN] = b"Ifmmp-!xpsme\"";
 
-#[cfg(any(unix, windows))]
 #[test]
 fn inherit() {
 	let socket_addr: socket2::SockAddr =
@@ -56,7 +55,6 @@ fn inherit() {
 	drop(child_process);
 }
 
-#[cfg(any(unix, windows))]
 #[test]
 fn unix() {
 	// Do this twice, in order to verify that deleting and replacing the Unix socket works.

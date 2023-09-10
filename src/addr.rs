@@ -3,7 +3,8 @@ use crate::{
 		CleanupSocketError,
 		InvalidSocketAddrError,
 	},
-	RawSocket,
+	is_unix_socket,
+	sys,
 };
 use std::{
 	fmt::{self, Display, Formatter},
@@ -15,9 +16,6 @@ use std::{
 
 #[cfg(doc)]
 use crate::convert::AnyStdSocket;
-
-#[cfg(any(unix, windows))]
-use crate::is_unix_socket;
 
 /// The address to bind a socket to, or a description of an inherited socket to use. This is one of the three parameters to [`open`][crate::open()].
 ///
@@ -80,7 +78,7 @@ pub enum SocketAddr {
 	///
 	/// # Availability
 	///
-	/// Windows and Unix-like platforms.
+	/// All platforms.
 	///
 	/// # Syntax
 	///
@@ -90,7 +88,7 @@ pub enum SocketAddr {
 	#[non_exhaustive]
 	Inherit {
 		/// The socket's file descriptor number or Windows `SOCKET` handle.
-		socket: RawSocket,
+		socket: sys::RawSocket,
 	},
 
 	/// An existing socket inherited from the parent process, as the standard input.
@@ -104,7 +102,7 @@ pub enum SocketAddr {
 	///
 	/// # Availability
 	///
-	/// Windows, Unix-like platforms, and WASI.
+	/// All platforms.
 	///
 	/// Availability notes for the `Inherit` variant also apply to this variant.
 	///
@@ -122,7 +120,7 @@ pub enum SocketAddr {
 	///
 	/// # Availability
 	///
-	/// Unix-like platforms and WASI.
+	/// Unix-like platforms only.
 	///
 	/// Note that, although systemd is Linux-specific, the systemd socket activation protocol is not, and other implementations for other platforms may exist. The socket activation protocol can be implemented on any platform with Unix-like inheritable file descriptors and environment variables.
 	///
@@ -131,44 +129,42 @@ pub enum SocketAddr {
 	/// # Syntax
 	///
 	/// <code>systemd:<var>n</var></code> where <code><var>n</var></code> is a file descriptor number for a socket inherited from systemd, starting at 3.
+	#[cfg(not(windows))]
 	#[non_exhaustive]
 	SystemdNumeric {
 		/// The socket's file descriptor number.
-		socket: RawSocket,
+		socket: sys::RawSocket,
 	},
 }
 
 impl SocketAddr {
 	/// Returns true if and only if this `SocketAddr` is one of the inherited variants, like `Inherit` or `SystemdNumeric`.
 	pub fn is_inherited(&self) -> bool {
-		matches!(self,
+		match self {
 			| Self::Inherit { .. }
-			| Self::InheritStdin { .. }
-			| Self::SystemdNumeric { .. }
-		)
+			| Self::InheritStdin
+			=> true,
+
+			#[cfg(not(windows))]
+			Self::SystemdNumeric { .. } => true,
+
+			_ => false,
+		}
 	}
 
 	/// Deletes the indicated path-based Unix-domain socket, if applicable.
 	///
-	/// This method does nothing if:
-	///
-	/// * `self` is not [`SocketAddr::Unix`],
-	/// * this is neither a Unix-like platform nor Windows, or
-	/// * there is not a Unix-domain socket at `self.path`.
+	/// This method does nothing if `self` is not [`SocketAddr::Unix`], or if there is not a Unix-domain socket at `self.path`.
 	///
 	/// This method attempts to check if the file at `self.path` really is a Unix-domain socket before deleting it. This check is imperfect, however; it is possible for a Unix-domain socket to be replaced with some other kind of file after the check but before the deletion (a [TOCTTOU] issue).
 	///
 	/// [TOCTTOU]: https://en.wikipedia.org/wiki/Time-of-check_to_time-of-use
-	///
-	///
-	/// # Availability
-	///
-	/// All platforms, but this method does nothing on platforms that are neither Unix-like nor Windows.
 	pub fn cleanup(&self) -> Result<(), CleanupSocketError> {
-		match self {
-			#[cfg(any(unix, windows))] Self::Unix { path, .. } => cleanup_unix_path_socket(path),
-			_ => Ok(()),
+		if let Self::Unix { path, .. } = self {
+			cleanup_unix_path_socket(path)?;
 		}
+
+		Ok(())
 	}
 }
 
@@ -183,27 +179,34 @@ impl FromStr for SocketAddr {
 
 		// See if it's `fd:n`, `socket:n`, or `systemd:n`.
 		{
-			enum InheritKind { RawFd, Systemd }
+			enum InheritKind { RawFd, #[cfg(not(windows))] Systemd }
 			const RAW_FD_PREFIX: &str = "fd:";
 			const RAW_SOCKET_PREFIX: &str = "socket:";
-			const SYSTEMD_PREFIX: &str = "systemd:";
+			#[cfg(not(windows))] const SYSTEMD_PREFIX: &str = "systemd:";
 
 			let inherit_kind: Option<InheritKind>;
 			let inherit_prefix: &str;
 
-			if s.starts_with(RAW_FD_PREFIX) {
-				inherit_kind = Some(InheritKind::RawFd);
-				inherit_prefix = RAW_FD_PREFIX;
-			}
-			else if s.starts_with(RAW_SOCKET_PREFIX) {
-				inherit_kind = Some(InheritKind::RawFd);
-				inherit_prefix = RAW_SOCKET_PREFIX;
-			}
-			else if s.starts_with(SYSTEMD_PREFIX) {
-				inherit_kind = Some(InheritKind::Systemd);
-				inherit_prefix = SYSTEMD_PREFIX;
-			}
-			else {
+			'found: {
+				if s.starts_with(RAW_FD_PREFIX) {
+					inherit_kind = Some(InheritKind::RawFd);
+					inherit_prefix = RAW_FD_PREFIX;
+					break 'found;
+				}
+
+				if s.starts_with(RAW_SOCKET_PREFIX) {
+					inherit_kind = Some(InheritKind::RawFd);
+					inherit_prefix = RAW_SOCKET_PREFIX;
+					break 'found;
+				}
+
+				#[cfg(not(windows))]
+				if s.starts_with(SYSTEMD_PREFIX) {
+					inherit_kind = Some(InheritKind::Systemd);
+					inherit_prefix = SYSTEMD_PREFIX;
+					break 'found;
+				}
+
 				inherit_kind = None;
 				inherit_prefix = "";
 			}
@@ -214,7 +217,7 @@ impl FromStr for SocketAddr {
 					s.get(inherit_prefix.len()..)
 					.unwrap_or_default();
 
-				let socket: RawSocket =
+				let socket: sys::RawSocket =
 					socket.parse()
 					.map_err(|error| InvalidSocketAddrError::InvalidSocketNum { error })?;
 
@@ -223,6 +226,7 @@ impl FromStr for SocketAddr {
 						socket,
 					},
 
+					#[cfg(not(windows))]
 					InheritKind::Systemd => Self::SystemdNumeric {
 						socket,
 					},
@@ -276,12 +280,11 @@ impl Display for SocketAddr {
 			#[cfg(windows)] Self::Inherit { socket } => write!(f, "socket:{socket}"),
 			#[cfg(not(windows))] Self::Inherit { socket } => write!(f, "fd:{socket}"),
 			Self::InheritStdin {} => write!(f, "stdin"),
-			Self::SystemdNumeric { socket } => write!(f, "systemd:{socket}"),
+			#[cfg(not(windows))] Self::SystemdNumeric { socket } => write!(f, "systemd:{socket}"),
 		}
 	}
 }
 
-#[cfg(any(unix, windows))]
 pub(crate) fn cleanup_unix_path_socket(path: &Path) -> Result<(), CleanupSocketError> {
 	let is_unix_socket: bool =
 		is_unix_socket(path)

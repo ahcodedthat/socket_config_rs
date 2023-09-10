@@ -76,16 +76,14 @@ pub enum OpenSocketError {
 	},
 
 	/// The [`SocketAddr`] specifies a socket inherited from systemd socket activation, but no such socket was inherited.
+	///
+	/// # Availability
+	///
+	/// Non-Windows platforms only.
+	#[cfg(not(windows))]
 	#[error("no such inherited socket (according to the `LISTEN_PID` and `LISTEN_FDS` environment variables)")]
 	#[non_exhaustive]
 	InvalidSystemdFd,
-
-	/// The [`SocketAddr`] specifies a socket inherited from systemd socket activation, but systemd socket activation is not supported on this platform.
-	///
-	/// This error only occurs on platforms where implementing the systemd socket activation protocol is impossible, namely Windows.
-	#[error("systemd socket inheritance is not supported on this platform")]
-	#[non_exhaustive]
-	SystemdFdNotSupported,
 
 	/// There was an error getting the standard input handle.
 	///
@@ -123,14 +121,6 @@ pub enum OpenSocketError {
 
 		/// The type that the socket actually has.
 		actual: socket2::Type,
-	},
-
-	/// A user option was used that is not supported on the current platform.
-	#[error("the `{name}` option is not supported on this platform")]
-	#[non_exhaustive]
-	UnsupportedUserOption {
-		/// The name of the option that is not supported, as it appears in the API documentation, such as `unix_socket_permissions`.
-		name: &'static str,
 	},
 
 	/// A user option was used that is not applicable to this kind of socket.
@@ -237,6 +227,11 @@ pub enum OpenSocketError {
 	},
 
 	/// There was an error setting the owner of the socket.
+	///
+	/// # Availability
+	///
+	/// Unix-like platforms only.
+	#[cfg(unix)]
 	#[error("`unix_socket_owner` and/or `unix_socket_group` was used, but there was an error setting the socket's owner: {error}")]
 	#[non_exhaustive]
 	SetOwner {
@@ -246,6 +241,11 @@ pub enum OpenSocketError {
 	},
 
 	/// There was an error setting permissions on the socket.
+	///
+	/// # Availability
+	///
+	/// Unix-like platforms only.
+	#[cfg(unix)]
 	#[error("`unix_socket_permissions` was used, but there was an error setting the socket's permissions: {error}")]
 	#[non_exhaustive]
 	SetPermissions {
@@ -290,10 +290,7 @@ impl From<OpenSocketError> for io::Error {
 		use io::ErrorKind as EK;
 
 		let kind = match &error {
-			OpenSocketError::InvalidSystemdFd              => EK::NotFound    ,
-			OpenSocketError::SystemdFdNotSupported         => EK::Unsupported ,
 			OpenSocketError::InheritWrongType { .. }       => EK::InvalidData ,
-			OpenSocketError::UnsupportedUserOption { .. }  => EK::Unsupported ,
 			OpenSocketError::InapplicableUserOption { .. } => EK::InvalidInput,
 			OpenSocketError::InheritedIsListening          => EK::InvalidData ,
 			OpenSocketError::InheritedIsNotListening       => EK::InvalidData ,
@@ -304,8 +301,6 @@ impl From<OpenSocketError> for io::Error {
 			| OpenSocketError::MkdirParents { error }
 			| OpenSocketError::BeforeBind(error)
 			| OpenSocketError::Bind { error }
-			| OpenSocketError::SetOwner { error }
-			| OpenSocketError::SetPermissions { error }
 			| OpenSocketError::Listen { error }
 			| OpenSocketError::CheckInheritedSocket { error }
 			| OpenSocketError::Cleanup(
@@ -314,6 +309,9 @@ impl From<OpenSocketError> for io::Error {
 			)
 			| OpenSocketError::SetSockOpt { error, .. }
 			=> error.kind(),
+
+			#[cfg(not(windows))]
+			OpenSocketError::InvalidSystemdFd => EK::NotFound,
 
 			#[cfg(windows)]
 			OpenSocketError::WindowsGetStdin { error } => error.kind(),
@@ -326,6 +324,8 @@ impl From<OpenSocketError> for io::Error {
 			#[cfg(unix)]
 			| OpenSocketError::LookupOwner { error }
 			| OpenSocketError::LookupUnixGroup { error }
+			| OpenSocketError::SetOwner { error }
+			| OpenSocketError::SetPermissions { error }
 			=> error.kind(),
 		};
 
@@ -379,16 +379,16 @@ impl From<CleanupSocketError> for io::Error {
 pub enum IntoTokioError {
 	/// The socket is the wrong type or protocol. This can happen when trying to convert a UDP socket into an [`AnyTokioListener`], for example.
 	///
-	/// Note that this error can be caused by attempting to use a Unix-domain socket on Windows, which is not yet supported. A special error message is used if this happens.
+	/// Note that this error can be caused by attempting to use a Unix-domain socket on Windows, which is not currently supported. A special error message is used if this happens.
 	#[error("{}", match socket {
-		#[cfg(windows)]
+		#[cfg(all(windows, not(unix)))]
 		AnyStdSocket::Other(socket)
 		if {
 			let local_addr = socket.local_addr().ok();
 			let domain = local_addr.map(|a| a.domain());
 			domain == Some(socket2::Domain::UNIX)
 		}
-		=> "Unix-domain sockets are not yet supported on Windows",
+		=> "Unix-domain sockets are not currently supported on Windows",
 
 		_ => "inappropriate or unrecognized socket domain, type, or transport protocol",
 	})]
