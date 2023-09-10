@@ -166,7 +166,9 @@ pub fn open(
 			check_inapplicable(user_options.unix_socket_group.as_ref(), "unix_socket_group")?;
 		}
 
+		#[cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))]
 		check_inapplicable_bool(user_options.ip_socket_reuse_port, "ip_socket_reuse_port")?;
+
 		check_inapplicable_bool(user_options.ip_socket_v6_only, "ip_socket_v6_only")?;
 		check_inapplicable(user_options.listen_socket_backlog, "listen_socket_backlog")?;
 
