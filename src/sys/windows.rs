@@ -1,3 +1,4 @@
+use crate::convert::SocketState;
 use socket2::Socket;
 use std::{
 	ffi::c_int,
