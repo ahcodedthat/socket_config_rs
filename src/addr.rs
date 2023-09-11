@@ -107,6 +107,12 @@ pub enum SocketAddr {
 	Inherit {
 		/// The socket's file descriptor number or Windows `SOCKET` handle.
 		socket: sys::RawSocket,
+
+		// Note: We use `RawSocket` here, rather than `BorrowedSocket<'static>` or `OwnedSocket`, for a few reasons:
+		//
+		// 1. `OwnedSocket` closes the socket when dropped. Developers using this library may assume that it is valid to parse a `SocketAddr`, drop it, then parse it again later, but that won't work correctly (and will cause undefined behavior) if `OwnedSocket` closes the inherited socket.
+		//
+		// 2. `BorrowedSocket` and `OwnedSocket` guarantee that the socket is valid. That is not known at the time of parsing. It is verified by `open`, which duplicates the alleged socket (which fails if no such socket exists) and then checks various things about the alleged socket (which fails if it's not a socket). That's still only mostly safe, but storing a `BorrowedSocket` or `OwnedSocket` here makes the representation that it's definitely a valid socket, which is definitely not safe.
 	},
 
 	/// An existing socket inherited from the parent process, as the standard input.
