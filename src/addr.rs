@@ -10,23 +10,34 @@ use std::{
 	fmt::{self, Display, Formatter},
 	fs,
 	io,
+	net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
 	path::{Path, PathBuf},
 	str::FromStr,
 };
 
 #[cfg(doc)]
-use crate::convert::AnyStdSocket;
+use crate::{
+	convert::AnyStdSocket,
+	SocketAppOptions,
+};
 
 /// The address to bind a socket to, or a description of an inherited socket to use. This is one of the three parameters to [`open`][crate::open()].
 ///
 /// This is somewhat like [`std::net::SocketAddr`], but has many more variants.
 ///
-/// This type is designed to be parsed from a string using [`str::parse`] or [`FromStr::from_str`]. The documentation for each variant has a “Syntax” section explaining the expected syntax.
+/// This type is designed to be parsed or converted from other types, namely:
+///
+/// * From a string, using [`str::parse`] or [`FromStr::from_str`]. The documentation for each variant has a “Syntax” section explaining the expected syntax.
+/// * [`From`] various standard library socket address types. The implementation of <code>From&lt;[PathBuf]&gt;</code> produces [`SocketAddr::Unix`].
 #[cfg_attr(feature = "serde", doc = r#"
-
-This type also implements [`serde::Deserialize`]. The serialized representation is expected to be a string, also using the syntax described in the aforementioned “Syntax” sections.
+* From a serialization format supported by [`serde`]. The serialized representation is expected to be a string, also using the syntax described in the aforementioned “Syntax” sections.
 "#)]
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+///
+///
+/// # Availability
+///
+/// All platforms. Deserializing with `serde` requires the `serde` feature.
+#[derive(Clone, Debug, Eq, derive_more::From, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr))]
 #[non_exhaustive]
 pub enum SocketAddr {
@@ -38,8 +49,12 @@ pub enum SocketAddr {
 	///
 	/// # Syntax
 	///
+	/// * `1.2.3.4`, an IPv4 address without port number
 	/// * `1.2.3.4:5`, an IPv4 address with port number
+	/// * `1::2`, a non-bracketed IPv6 address without port number
 	/// * `[1::2]:3`, a bracketed IPv6 address with port number
+	///
+	/// If no port number is given, it defaults to 0.
 	#[non_exhaustive]
 	Ip {
 		/// The IP address and port.
@@ -87,6 +102,7 @@ pub enum SocketAddr {
 	/// <code>fd:<var>n</var></code> or <code>socket:<var>n</var></code> where <code><var>n</var></code> is a file descriptor number or Windows `SOCKET` handle.
 	///
 	/// Note that the `fd:` and `socket:` prefixes are synonymous. Either one is accepted on any platform. When a `SocketAddr` is [`Display`]ed, the `socket:` prefix is used on Windows, and `fd:` is used on all other platforms.
+	#[from(ignore)]
 	#[non_exhaustive]
 	Inherit {
 		/// The socket's file descriptor number or Windows `SOCKET` handle.
@@ -111,6 +127,7 @@ pub enum SocketAddr {
 	/// # Syntax
 	///
 	/// The exact string `stdin`.
+	#[from(ignore)]
 	#[non_exhaustive]
 	InheritStdin,
 
@@ -132,6 +149,7 @@ pub enum SocketAddr {
 	///
 	/// <code>systemd:<var>n</var></code> where <code><var>n</var></code> is a file descriptor number for a socket inherited from systemd, starting at 3.
 	#[cfg(not(windows))]
+	#[from(ignore)]
 	#[non_exhaustive]
 	SystemdNumeric {
 		/// The socket's file descriptor number.
@@ -167,6 +185,14 @@ impl SocketAddr {
 		}
 
 		Ok(())
+	}
+
+	fn from_std_ip(addr: IpAddr) -> Self {
+		Self::from_std_ip_port(std::net::SocketAddr::new(addr, 0))
+	}
+
+	fn from_std_ip_port(addr: std::net::SocketAddr) -> Self {
+		Self::Ip { addr }
 	}
 }
 
@@ -262,10 +288,12 @@ impl FromStr for SocketAddr {
 			})
 		}
 
-		// Assume anything else must be an IP address and port number. Try to parse it as that. If that fails, signal that the address is unrecognized.
+		// Assume anything else must be an IP address with optional port number. Try to parse it as that. If that fails, signal that the address is unrecognized.
 		Ok(Self::Ip {
 			addr: {
-				s.parse()
+				IpAddr::from_str(s)
+				.map(|ip_addr| std::net::SocketAddr::new(ip_addr, 0))
+				.or_else(|_| std::net::SocketAddr::from_str(s))
 				.map_err(|ip_error| InvalidSocketAddrError::Unrecognized {
 					ip_error,
 				})?
@@ -284,6 +312,36 @@ impl Display for SocketAddr {
 			Self::InheritStdin {} => write!(f, "stdin"),
 			#[cfg(not(windows))] Self::SystemdNumeric { socket } => write!(f, "systemd:{socket}"),
 		}
+	}
+}
+
+impl From<IpAddr> for SocketAddr {
+	fn from(addr: IpAddr) -> Self {
+		Self::from_std_ip(addr)
+	}
+}
+
+impl From<Ipv4Addr> for SocketAddr {
+	fn from(addr: Ipv4Addr) -> Self {
+		Self::from_std_ip(IpAddr::from(addr))
+	}
+}
+
+impl From<Ipv6Addr> for SocketAddr {
+	fn from(addr: Ipv6Addr) -> Self {
+		Self::from_std_ip(IpAddr::from(addr))
+	}
+}
+
+impl From<SocketAddrV4> for SocketAddr {
+	fn from(addr: SocketAddrV4) -> Self {
+		Self::from_std_ip_port(std::net::SocketAddr::from(addr))
+	}
+}
+
+impl From<SocketAddrV6> for SocketAddr {
+	fn from(addr: SocketAddrV6) -> Self {
+		Self::from_std_ip_port(std::net::SocketAddr::from(addr))
 	}
 }
 
