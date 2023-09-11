@@ -8,7 +8,7 @@ use std::{
 	fs,
 	io,
 	os::{
-		fd::AsRawFd,
+		fd::{AsRawFd, IntoRawFd},
 		unix::fs::FileTypeExt,
 	},
 	path::Path,
@@ -102,4 +102,12 @@ pub(crate) fn get_socket_state(socket: &Socket) -> io::Result<SocketState> {
 	}
 
 	Ok(SocketState { r#type, protocol, is_listening })
+}
+
+pub fn as_raw_socket(socket: &impl AsRawFd) -> RawSocket {
+	socket.as_raw_fd()
+}
+
+pub fn into_raw_socket(socket: impl IntoRawFd) -> RawSocket {
+	socket.into_raw_fd()
 }

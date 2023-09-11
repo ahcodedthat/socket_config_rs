@@ -28,7 +28,10 @@ use crate::{
 /// This type is designed to be parsed or converted from other types, namely:
 ///
 /// * From a string, using [`str::parse`] or [`FromStr::from_str`]. The documentation for each variant has a “Syntax” section explaining the expected syntax.
-/// * [`From`] various standard library socket address types. The implementation of <code>From&lt;[PathBuf]&gt;</code> produces [`SocketAddr::Unix`].
+/// * [`From`] various standard library socket address types.
+/// * `From` [`PathBuf`], which produces [`SocketAddr::Unix`].
+/// * `From` a borrowed or owned raw socket type with `'static` lifetime, such as `std::os::fd::BorrowedFd<'static>` or `std::os::windows::io::OwnedSocket`, which produces [`SocketAddr::Inherit`].
+/// * [`TryFrom`] `std::os::unix::net::SocketAddr` (Unix-like platforms only), which produces [`SocketAddr::Unix`] if the input address has a pathname, or fails if the input address is unnamed or (Linux only) has an abstract name.
 #[cfg_attr(feature = "serde", doc = r#"
 * From a serialization format supported by [`serde`]. The serialized representation is expected to be a string, also using the syntax described in the aforementioned “Syntax” sections.
 "#)]
@@ -348,6 +351,50 @@ impl From<SocketAddrV4> for SocketAddr {
 impl From<SocketAddrV6> for SocketAddr {
 	fn from(addr: SocketAddrV6) -> Self {
 		Self::from_std_ip_port(std::net::SocketAddr::from(addr))
+	}
+}
+
+impl From<sys::BorrowedSocket<'static>> for SocketAddr {
+	fn from(socket: sys::BorrowedSocket<'static>) -> Self {
+		Self::Inherit {
+			socket: sys::as_raw_socket(&socket),
+		}
+	}
+}
+
+impl From<sys::OwnedSocket> for SocketAddr {
+	fn from(socket: sys::OwnedSocket) -> Self {
+		Self::Inherit {
+			socket: sys::into_raw_socket(socket),
+		}
+	}
+}
+
+#[cfg(unix)]
+impl<'a> TryFrom<&'a std::os::unix::net::SocketAddr> for SocketAddr {
+	type Error = ();
+
+	fn try_from(addr: &std::os::unix::net::SocketAddr) -> Result<Self, Self::Error> {
+		if let Some(path) = addr.as_pathname() {
+			Ok(Self::Unix {
+				path: path.to_owned(),
+			})
+		}
+		else {
+			Err(())
+		}
+	}
+}
+
+#[cfg(unix)]
+impl TryFrom<std::os::unix::net::SocketAddr> for SocketAddr {
+	type Error = std::os::unix::net::SocketAddr;
+
+	fn try_from(addr: std::os::unix::net::SocketAddr) -> Result<Self, Self::Error> {
+		match SocketAddr::try_from(&addr) {
+			Ok(ok) => Ok(ok),
+			Err(()) => Err(addr),
+		}
 	}
 }
 
