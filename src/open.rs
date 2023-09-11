@@ -215,7 +215,15 @@ pub fn open(
 	};
 
 	let socket: Socket = match address {
-		SocketAddr::Ip { addr } => open_new((*addr).into())?,
+		SocketAddr::Ip { addr } => {
+			let mut addr: std::net::SocketAddr = *addr;
+
+			if addr.port() == 0 && app_options.default_port != 0 {
+				addr.set_port(app_options.default_port);
+			}
+
+			open_new(addr.into())?
+		}
 
 		SocketAddr::Unix { path } => {
 			let address =

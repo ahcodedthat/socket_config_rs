@@ -25,8 +25,9 @@ async fn main() -> anyhow::Result<()> {
 	// Parse the command line options.
 	let command_line = <CommandLine as clap::Parser>::parse();
 
-	// Set up the `SocketAppOptions`. In this example, we'll just use the defaults.
-	let socket_app_options = SocketAppOptions::new(socket2::Type::STREAM);
+	// Set up the `SocketAppOptions`. In this example, we'll use the defaults, except for an explicit default port of 27910.
+	let mut socket_app_options = SocketAppOptions::new(socket2::Type::STREAM);
+	socket_app_options.default_port = 27910;
 
 	// Open the socket.
 	let socket: Socket = socket_config::open(

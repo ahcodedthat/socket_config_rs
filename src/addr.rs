@@ -54,7 +54,7 @@ pub enum SocketAddr {
 	/// * `1::2`, a non-bracketed IPv6 address without port number
 	/// * `[1::2]:3`, a bracketed IPv6 address with port number
 	///
-	/// If no port number is given, it defaults to 0.
+	/// If no port number is given, it defaults to 0, but see [`SocketAppOptions::default_port`].
 	#[non_exhaustive]
 	Ip {
 		/// The IP address and port.
