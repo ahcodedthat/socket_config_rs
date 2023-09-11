@@ -46,6 +46,7 @@ pub mod convert;
 pub mod errors;
 mod open;
 mod options;
+#[cfg(unix)] mod unix_security;
 mod util;
 
 pub use self::{
@@ -54,9 +55,6 @@ pub use self::{
 	options::*,
 	util::*,
 };
-
-#[cfg(unix)]
-pub mod unix_security;
 
 cfg_if::cfg_if! {
 	if #[cfg(windows)] {

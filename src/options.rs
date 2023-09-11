@@ -5,7 +5,10 @@ use std::{
 };
 
 #[cfg(unix)]
-use crate::unix_security::*;
+use nix::{
+	sys::stat::Mode,
+	unistd::{Gid, Uid},
+};
 
 #[cfg(doc)]
 use crate::SocketAddr;
@@ -30,42 +33,69 @@ pub struct SocketUserOptions {
 	#[cfg_attr(feature = "clap", arg(long))]
 	pub unix_socket_no_unlink: bool,
 
-	/// Permissions for created, path-based Unix-domain sockets. This can be either an octal number (as in the `chmod` command) or any combination of the letters `u`, `g`, and `o`, standing for the owning user, owning group, and all other users, respectively. The default is to use the process umask (permission mask).
+	/// Permissions for created, path-based Unix-domain sockets. The default is to use the process umask (permission mask).
 	///
 	/// This option applies only to non-inherited path-based Unix-domain sockets. Using it on any other kind of socket, such as a TCP socket or an inherited Unix-domain socket, is an error.
+	///
+	/// # Command line syntax
+	///
+	/// This can be either a numeric Unix mode (as in the `chmod` command) or any combination of the letters `u`, `g`, and `o`, standing for the owning user, owning group, and all other users, respectively.
+	///
+	/// # Configuration file syntax
+	///
+	/// This can be either a numeric Unix mode, a string containing a numeric Unix mode in octal form, or a string containing any combination of the letters `u`, `g`, and `o`, standing for the owning user, owning group, and all other users, respectively.
 	///
 	/// # Availability
 	///
 	/// Unix-like platforms. Using this option on other platforms is an error.
 	#[cfg(unix)]
-	#[cfg_attr(feature = "clap", arg(long))]
-	pub unix_socket_permissions: Option<UnixSocketPermissions>,
+	#[cfg_attr(feature = "clap", arg(long, value_parser = crate::unix_security::parse_mode))]
+	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::DeserMode>>"))]
+	pub unix_socket_permissions: Option<Mode>,
 
-	/// Owner for created, path-based Unix-domain sockets, by name or numeric UID.
+	/// Owner for created, path-based Unix-domain sockets.
 	///
 	/// This option is applicable only to path-based Unix-domain sockets that are being created. Using it on any other kind of socket, such as a TCP socket or an inherited Unix-domain socket, is an error.
 	///
 	/// In order to change the owner of a file, including a Unix-domain socket, most operating systems require special privileges, such as the capability `CAP_CHOWN` on Linux.
 	///
+	/// # Command line syntax
+	///
+	/// Either a numeric user ID or a user name.
+	///
+	/// # Configuration file syntax
+	///
+	/// Either a user ID as a number, or a user name as a string.
+	///
 	/// # Availability
 	///
 	/// Unix-like platforms. Using this option on other platforms is an error.
 	#[cfg(unix)]
-	#[cfg_attr(feature = "clap", arg(long))]
-	pub unix_socket_owner: Option<UnixUser>,
+	#[cfg_attr(feature = "clap", arg(long, value_parser = crate::unix_security::parse_uid))]
+	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::DeserUid>>"))]
+	pub unix_socket_owner: Option<Uid>,
 
-	/// Group for created, path-based Unix-domain sockets, by name or numeric GID.
+	/// Group for created, path-based Unix-domain sockets.
 	///
 	/// This option is applicable only to path-based Unix-domain sockets that are being created. Using it on any other kind of socket, such as a TCP socket or an inherited Unix-domain socket, is an error.
 	///
 	/// In order to change the group of a file, including a Unix-domain socket, most operating systems require the process to either be a member of that group or have special privileges, such as the capability `CAP_CHOWN` on Linux.
 	///
+	/// # Command line syntax
+	///
+	/// Either a numeric group ID or a group name.
+	///
+	/// # Configuration file syntax
+	///
+	/// Either a group ID as a number, or a group name as a string.
+	///
 	/// # Availability
 	///
 	/// Unix-like platforms. Using this option on other platforms is an error.
 	#[cfg(unix)]
-	#[cfg_attr(feature = "clap", arg(long))]
-	pub unix_socket_group: Option<UnixGroup>,
+	#[cfg_attr(feature = "clap", arg(long, value_parser = crate::unix_security::parse_gid))]
+	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::DeserGid>>"))]
+	pub unix_socket_group: Option<Gid>,
 
 	/// Set the socket option `SO_REUSEPORT`, which allows multiple processes to receive connections or packets on the same port.
 	///

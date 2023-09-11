@@ -1,46 +1,37 @@
-//! Security attributes for Unix-like platforms.
-//!
-//! # Availability
-//!
-//! Unix-like platforms only.
-
 use crate::{
-	errors::{
-		OpenSocketError,
-		UnixSocketPermissionsParseError,
-	},
+	errors::OpenSocketError,
 	SocketUserOptions,
 	util::check_inapplicable,
 };
-use libc::{gid_t, mode_t, uid_t};
-use nix::{
-	sys::stat::Mode,
-	unistd::{chown, Gid, Group, Uid, User},
-};
+use nix::unistd::chown;
+use socket2::Socket;
 use std::{
-	convert::Infallible,
-	fmt::{self, Debug, Display, Formatter},
 	fs,
 	os::unix::fs::PermissionsExt,
 	path::Path,
-	str::FromStr,
 };
 
-/// Newtype wrapper around a Unix [`Mode`]. Parses as either a number or a string containing any combination of the letters `u`, `g`, and `o`.
-#[derive(derive_more::AsRef, derive_more::AsMut, Clone, Copy, Debug, derive_more::Deref, Eq, derive_more::From, derive_more::Into, PartialEq)]
-pub struct UnixSocketPermissions(pub Mode);
+#[cfg(any(feature = "clap", feature = "serde"))]
+mod parse_common {
+	use libc::{gid_t, mode_t, uid_t};
+	use nix::{
+		sys::stat::Mode,
+		unistd::{Gid, Group, Uid, User},
+	};
 
-impl FromStr for UnixSocketPermissions {
-	type Err = UnixSocketPermissionsParseError;
+	#[derive(Debug, thiserror::Error)]
+	#[error("unrecognized character in `unix_socket_permissions` (only the letters `u`, `g`, and `o`, or an octal mode number, are recognized)")]
+	pub struct UnixSocketPermissionsParseError;
 
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		if let Ok(i) = mode_t::from_str_radix(s, 8) {
-			i.try_into()
+	pub fn parse_mode(mode_str: &str) -> Result<Mode, UnixSocketPermissionsParseError> {
+		if let Ok(i) = mode_t::from_str_radix(mode_str, 8) {
+			Mode::from_bits(i)
+			.ok_or(UnixSocketPermissionsParseError)
 		}
 		else {
 			let mut mode = Mode::empty();
 
-			for byte in s.bytes() {
+			for byte in mode_str.bytes() {
 				mode |= match byte {
 					b'-' => Mode::empty(),
 					b'u' => Mode::S_IRUSR | Mode::S_IWUSR,
@@ -50,258 +41,387 @@ impl FromStr for UnixSocketPermissions {
 				};
 			}
 
-			Ok(Self(mode))
+			Ok(mode)
 		}
 	}
-}
 
-impl TryFrom<mode_t> for UnixSocketPermissions {
-	type Error = UnixSocketPermissionsParseError;
-
-	fn try_from(value: mode_t) -> Result<Self, Self::Error> {
-		Mode::from_bits(value)
-		.ok_or(UnixSocketPermissionsParseError)
-		.map(Self)
-	}
-}
-
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for UnixSocketPermissions {
-	fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-		struct Visitor;
-
-		impl Visitor {
-			fn visit_int<'de, T, E>(self, v: T) -> Result<<Self as serde::de::Visitor<'de>>::Value, E>
-			where
-				T: Copy + std::fmt::Octal + TryInto<mode_t>,
-				E: serde::de::Error,
-			{
-				(|| {
-					let mode: mode_t =
-						v.try_into()
-						.map_err(|_| ())?;
-
-					let mode: Mode =
-						Mode::from_bits(mode)
-						.ok_or(())?;
-
-					Ok(UnixSocketPermissions(mode))
-				})().map_err(|()| E::invalid_value(
-					serde::de::Unexpected::Other(&format!("out-of-range numeric Unix mode {v:o}")),
-					&self,
-				))
-			}
-		}
-
-		impl<'de> serde::de::Visitor<'de> for Visitor {
-			type Value = UnixSocketPermissions;
-
-			fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-				write!(f, "a numeric Unix mode or a string containing some combination of the letters `u`, `g`, and `o`")
-			}
-
-			fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-				UnixSocketPermissions::from_str(v)
-				.map_err(|_| E::invalid_value(
-					serde::de::Unexpected::Str(v),
-					&self,
-				))
-			}
-
-			fn visit_i128<E: serde::de::Error>(self, v: i128) -> Result<Self::Value, E> {
-				self.visit_int(v)
-			}
-
-			fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
-				self.visit_int(v)
-			}
-
-			fn visit_u128<E: serde::de::Error>(self, v: u128) -> Result<Self::Value, E> {
-				self.visit_int(v)
-			}
-
-			fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
-				self.visit_int(v)
-			}
-		}
-
-		de.deserialize_any(Visitor)
-	}
-}
-
-#[test]
-fn test_unix_socket_permissions_parse() {
-	assert_eq!(
-		UnixSocketPermissions::from_str("644").unwrap(),
-		UnixSocketPermissions(Mode::from_bits(0o644).unwrap()),
-	);
-
-	let _ = UnixSocketPermissions::from_str("77777").unwrap_err();
-
-	#[cfg(feature = "serde")]
-	assert_eq!(
-		serde_json::from_str::<UnixSocketPermissions>("420").unwrap(),
-		UnixSocketPermissions(Mode::from_bits(420).unwrap()),
-	);
-
-	for (string, bits) in [
-		("", 0),
-		("u", 0o600),
-		("g", 0o060),
-		("ug", 0o660),
-		("o", 0o006),
-		("uo", 0o606),
-		("go", 0o066),
-		("ugo", 0o666),
-	] {
+	#[test]
+	fn test_parse_mode() {
 		assert_eq!(
-			UnixSocketPermissions::from_str(string).unwrap().0.bits(),
-			bits,
+			parse_mode("644").unwrap(),
+			Mode::from_bits(0o644).unwrap(),
+		);
+
+		let _ = parse_mode("77777").unwrap_err();
+
+		#[cfg(feature = "serde")]
+		#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+		struct ModeDeser(
+			#[serde(with = "serde_with::As::<super::DeserMode>")]
+			Mode
 		);
 
 		#[cfg(feature = "serde")]
-		for json_repr in [
-			format!("\"{string}\""),
-			format!("{bits}"),
-			format!("\"{bits:o}\""),
+		assert_eq!(
+			serde_json::from_str::<ModeDeser>("420").unwrap(),
+			ModeDeser(Mode::from_bits(420).unwrap()),
+		);
+
+		for (string, bits) in [
+			("", 0),
+			("u", 0o600),
+			("g", 0o060),
+			("ug", 0o660),
+			("o", 0o006),
+			("uo", 0o606),
+			("go", 0o066),
+			("ugo", 0o666),
 		] {
 			assert_eq!(
-				serde_json::from_str::<UnixSocketPermissions>(&json_repr).unwrap().0.bits(),
+				parse_mode(string).unwrap().bits(),
 				bits,
+			);
+
+			#[cfg(feature = "serde")]
+			for json_repr in [
+				format!("\"{string}\""),
+				format!("{bits}"),
+				format!("\"{bits:o}\""),
+			] {
+				assert_eq!(
+					serde_json::from_str::<ModeDeser>(&json_repr).unwrap().0.bits(),
+					bits,
+				);
+			}
+		}
+	}
+
+	#[cfg_attr(feature = "serde", derive(serde::Deserialize), serde(rename = "UnixPrincipal", untagged))]
+	pub(super) enum DeserUnixPrincipal<'a, I> {
+		Id(I),
+		Name(&'a str),
+	}
+
+	impl<'a> DeserUnixPrincipal<'a, uid_t> {
+		pub(super) fn to_uid(self) -> Result<Uid, UnixPrincipalLookupError> {
+			match self {
+				Self::Id(id) => Ok(Uid::from_raw(id)),
+				Self::Name(name) => match User::from_name(name) {
+					Ok(Some(user)) => Ok(user.uid),
+					Ok(None) => Err(UnixPrincipalLookupError::NotFound {
+						principal_kind: UnixPrincipalKind::User,
+					}),
+					Err(error) => Err(UnixPrincipalLookupError::Error {
+						principal_kind: UnixPrincipalKind::User,
+						error,
+					}),
+				},
+			}
+		}
+	}
+
+	impl<'a> DeserUnixPrincipal<'a, gid_t> {
+		pub(super) fn to_gid(self) -> Result<Gid, UnixPrincipalLookupError> {
+			match self {
+				Self::Id(id) => Ok(Gid::from_raw(id)),
+				Self::Name(name) => match Group::from_name(name) {
+					Ok(Some(group)) => Ok(group.gid),
+					Ok(None) => Err(UnixPrincipalLookupError::NotFound {
+						principal_kind: UnixPrincipalKind::Group,
+					}),
+					Err(error) => Err(UnixPrincipalLookupError::Error {
+						principal_kind: UnixPrincipalKind::Group,
+						error,
+					}),
+				},
+			}
+		}
+	}
+
+	#[derive(Clone, Copy, Debug, derive_more::Display, Eq, PartialEq)]
+	pub enum UnixPrincipalKind {
+		#[display(fmt = "user")]
+		User,
+
+		#[display(fmt = "group")]
+		Group,
+	}
+
+	#[derive(Debug, thiserror::Error)]
+	pub enum UnixPrincipalLookupError {
+		#[error("{principal_kind} not found")]
+		NotFound {
+			principal_kind: UnixPrincipalKind,
+		},
+
+		#[error("error looking up {principal_kind} ID: {error}")]
+		Error {
+			principal_kind: UnixPrincipalKind,
+
+			#[source]
+			error: nix::Error,
+		},
+	}
+
+	#[test]
+	fn test_principal_parse_lookup() {
+		use super::*;
+
+		let my_uid = Uid::current();
+		let my_user = User::from_uid(my_uid).unwrap().unwrap().name;
+		let my_gid = Gid::current();
+		let my_group = Group::from_gid(my_gid).unwrap().unwrap().name;
+
+		#[cfg(feature = "clap")] {
+			use assert_matches::assert_matches;
+
+			assert_eq!(
+				parse_uid(&format!("{my_uid}")).unwrap(),
+				my_uid,
+			);
+
+			assert_eq!(
+				parse_uid(&my_user).unwrap(),
+				my_uid,
+			);
+
+			assert_eq!(
+				parse_gid(&format!("{my_gid}")).unwrap(),
+				my_gid,
+			);
+
+			assert_eq!(
+				parse_gid(&my_group).unwrap(),
+				my_gid,
+			);
+
+			assert_matches!(
+				parse_uid("<imaginary user, looking up for testing, please ignore>"),
+				Err(UnixPrincipalLookupError::NotFound {
+					principal_kind: UnixPrincipalKind::User,
+				})
+			);
+
+			assert_matches!(
+				parse_gid("<imaginary group, looking up for testing, please ignore>"),
+				Err(UnixPrincipalLookupError::NotFound {
+					principal_kind: UnixPrincipalKind::Group,
+				})
+			);
+		}
+
+		#[cfg(feature = "serde")] {
+			#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+			struct UserAndGroup {
+				#[serde(with = "serde_with::As::<DeserUid>")]
+				user: Uid,
+
+				#[serde(with = "serde_with::As::<DeserGid>")]
+				group: Gid,
+			}
+
+			assert_eq!(
+				serde_json::from_str::<UserAndGroup>(&format!(r#"{{
+					"user": {my_uid},
+					"group": {my_gid}
+				}}"#)).unwrap(),
+
+				UserAndGroup {
+					user: my_uid,
+					group: my_gid,
+				},
+			);
+
+			assert_eq!(
+				serde_json::from_str::<UserAndGroup>(&format!(r#"{{
+					"user": "{my_user}",
+					"group": "{my_group}"
+				}}"#)).unwrap(),
+
+				UserAndGroup {
+					user: my_uid,
+					group: my_gid,
+				},
 			);
 		}
 	}
 }
 
-/// Identifies a Unix user or group (collectively a “principal”), by either name or numeric ID, for the purposes of Unix-domain socket ownership.
-///
-/// The parameter type `I` is the numeric identifier, typically `uid_t` or `gid_t`.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize), serde(untagged))]
-pub enum UnixPrincipal<I> {
-	/// Identifies a Unix principal by numeric ID.
-	Id(I),
+#[cfg(any(feature = "clap", feature = "serde"))]
+pub use self::parse_common::*;
 
-	/// Identifies a Unix principal by name.
-	Name(String),
-}
+#[cfg(feature = "clap")]
+mod from_str {
+	use libc::{gid_t, uid_t};
+	use nix::unistd::{Gid, Uid};
+	use std::str::FromStr;
+	use super::*;
 
-impl<I> FromStr for UnixPrincipal<I>
-where
-	I: FromStr,
-{
-	type Err = Infallible;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		if let Ok(id) = I::from_str(s) {
-			Ok(Self::Id(id))
-		}
-		else {
-			Ok(Self::Name(s.to_owned()))
-		}
-	}
-}
-
-impl<I> Display for UnixPrincipal<I>
-where
-	I: Display,
-{
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Id(id) => Display::fmt(id, f),
-			Self::Name(name) => Display::fmt(name, f),
-		}
-	}
-}
-
-/// Identifies a Unix user, by either name or numeric ID, for the purposes of Unix-domain socket ownership.
-pub type UnixUser = UnixPrincipal<uid_t>;
-
-/// Identifies a Unix group, by either name or numeric ID, for the purposes of Unix-domain socket ownership.
-pub type UnixGroup = UnixPrincipal<gid_t>;
-
-pub(crate) struct PreparedUnixSecurityAttributes<'a> {
-	socket_path: &'a Path,
-	owner: Option<Uid>,
-	group: Option<Gid>,
-	mode: Option<Mode>,
-}
-
-impl<'a> PreparedUnixSecurityAttributes<'a> {
-	pub(crate) fn new(
-		socket_path: Option<&'a Path>,
-		options: &SocketUserOptions,
-	) -> Result<Option<Self>, OpenSocketError> {
-		let Some(socket_path) = socket_path else {
-			// If the socket in question is not path-based, then we can't apply security attributes to it, so just make sure none of the security-attribute-related options were used.
-
-			check_inapplicable(options.unix_socket_owner.as_ref(), "unix_socket_owner")?;
-			check_inapplicable(options.unix_socket_group.as_ref(), "unix_socket_group")?;
-			check_inapplicable(options.unix_socket_permissions, "unix_socket_permissions")?;
-
-			return Ok(None)
+	pub fn parse_uid(user: &str) -> Result<Uid, UnixPrincipalLookupError> {
+		let principal = {
+			if let Ok(id) = uid_t::from_str(user) {
+				DeserUnixPrincipal::Id(id)
+			}
+			else {
+				DeserUnixPrincipal::Name(user)
+			}
 		};
 
-		// Look up any user and/or group names that were given.
-		let owner: Option<Uid> =
-			options.unix_socket_owner.as_ref()
-			.map(|owner| match owner {
-				UnixUser::Id(id) => Ok(Uid::from_raw(*id)),
-				UnixUser::Name(name) => match User::from_name(name) {
-					Ok(Some(user)) => Ok(user.uid),
-					Ok(None) => Err(OpenSocketError::OwnerNotFound),
-					Err(error) => Err(OpenSocketError::LookupOwner {
-						error: error.into(),
-					}),
-				},
-			})
-			.transpose()?;
-
-		let group: Option<Gid> =
-			options.unix_socket_group.as_ref()
-			.map(|group| match group {
-				UnixGroup::Id(id) => Ok(Gid::from_raw(*id)),
-				UnixGroup::Name(name) => match Group::from_name(name) {
-					Ok(Some(group)) => Ok(group.gid),
-					Ok(None) => Err(OpenSocketError::UnixGroupNotFound),
-					Err(error) => Err(OpenSocketError::LookupUnixGroup {
-						error: error.into(),
-					}),
-				},
-			})
-			.transpose()?;
-
-		let mode: Option<Mode> =
-			options.unix_socket_permissions
-			.map(|perms| perms.0);
-
-		if owner.is_none() && group.is_none() && mode.is_none() {
-			return Ok(None);
-		}
-
-		Ok(Some(Self {
-			socket_path,
-			owner,
-			group,
-			mode,
-		}))
+		principal.to_uid()
 	}
 
-	pub(crate) fn apply(self) -> Result<(), OpenSocketError> {
-		if self.owner.is_some() || self.group.is_some() {
-			chown(self.socket_path, self.owner, self.group)
+	pub fn parse_gid(group: &str) -> Result<Gid, UnixPrincipalLookupError> {
+		let principal = {
+			if let Ok(id) = gid_t::from_str(group) {
+				DeserUnixPrincipal::Id(id)
+			}
+			else {
+				DeserUnixPrincipal::Name(group)
+			}
+		};
+
+		principal.to_gid()
+	}
+}
+
+#[cfg(feature = "clap")]
+pub use self::from_str::*;
+
+#[cfg(feature = "serde")]
+mod from_serde {
+	use libc::{gid_t, mode_t, uid_t};
+	use nix::{
+		sys::stat::Mode,
+		unistd::{Gid, Uid},
+	};
+	use serde::{
+		de::Error as _,
+		Deserialize,
+		Deserializer,
+	};
+	use serde_with::DeserializeAs;
+	use std::fmt;
+	use super::*;
+
+	pub struct DeserMode;
+	impl<'de> DeserializeAs<'de, Mode> for DeserMode {
+		fn deserialize_as<D: Deserializer<'de>>(de: D) -> Result<Mode, D::Error> {
+			struct Visitor;
+
+			impl Visitor {
+				fn visit_int<'de, T, E>(self, v: T) -> Result<<Self as serde::de::Visitor<'de>>::Value, E>
+				where
+					T: Copy + std::fmt::Octal + TryInto<mode_t>,
+					E: serde::de::Error,
+				{
+					(|| {
+						let mode: mode_t =
+							v.try_into()
+							.map_err(|_| ())?;
+
+						let mode: Mode =
+							Mode::from_bits(mode)
+							.ok_or(())?;
+
+						Ok(mode)
+					})().map_err(|()| E::invalid_value(
+						serde::de::Unexpected::Other(&format!("out-of-range numeric Unix mode {v:o}")),
+						&self,
+					))
+				}
+			}
+
+			impl<'de> serde::de::Visitor<'de> for Visitor {
+				type Value = Mode;
+
+				fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+					write!(f, "a numeric Unix mode or a string containing some combination of the letters `u`, `g`, and `o`")
+				}
+
+				fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+					parse_mode(v)
+					.map_err(|_| E::invalid_value(
+						serde::de::Unexpected::Str(v),
+						&self,
+					))
+				}
+
+				fn visit_i128<E: serde::de::Error>(self, v: i128) -> Result<Self::Value, E> {
+					self.visit_int(v)
+				}
+
+				fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+					self.visit_int(v)
+				}
+
+				fn visit_u128<E: serde::de::Error>(self, v: u128) -> Result<Self::Value, E> {
+					self.visit_int(v)
+				}
+
+				fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+					self.visit_int(v)
+				}
+			}
+
+			de.deserialize_any(Visitor)
+		}
+	}
+
+	pub struct DeserUid;
+	impl<'de> DeserializeAs<'de, Uid> for DeserUid {
+		fn deserialize_as<D: Deserializer<'de>>(de: D) -> Result<Uid, D::Error> {
+			let principal = DeserUnixPrincipal::<uid_t>::deserialize(de)?;
+
+			principal.to_uid().map_err(D::Error::custom)
+		}
+	}
+
+	pub struct DeserGid;
+	impl<'de> DeserializeAs<'de, Gid> for DeserGid {
+		fn deserialize_as<D: Deserializer<'de>>(de: D) -> Result<Gid, D::Error> {
+			let principal = DeserUnixPrincipal::<gid_t>::deserialize(de)?;
+
+			principal.to_gid().map_err(D::Error::custom)
+		}
+	}
+}
+
+#[cfg(feature = "serde")]
+pub use self::from_serde::*;
+
+pub fn prepare(
+	options: &SocketUserOptions,
+	socket_path: Option<&Path>,
+) -> Result<(), OpenSocketError> {
+	if let None = socket_path {
+		check_inapplicable(options.unix_socket_permissions, "unix_socket_permissions")?;
+		check_inapplicable(options.unix_socket_owner, "unix_socket_owner")?;
+		check_inapplicable(options.unix_socket_group, "unix_socket_group")?;
+	}
+
+	Ok(())
+}
+
+pub fn apply(
+	options: &SocketUserOptions,
+	_socket: &Socket,
+	socket_path: Option<&Path>,
+) -> Result<(), OpenSocketError> {
+	if let Some(socket_path) = socket_path {
+		if options.unix_socket_owner.is_some() || options.unix_socket_group.is_some() {
+			chown(socket_path, options.unix_socket_owner, options.unix_socket_group)
 			.map_err(|error| OpenSocketError::SetOwner {
 				error: error.into(),
 			})?;
 		}
 
-		if let Some(mode) = self.mode {
+		if let Some(mode) = options.unix_socket_permissions {
 			let permissions = fs::Permissions::from_mode(mode.bits());
 
-			fs::set_permissions(self.socket_path, permissions)
+			fs::set_permissions(socket_path, permissions)
 			.map_err(|error| OpenSocketError::SetPermissions { error })?;
 		}
-
-		Ok(())
 	}
+
+	Ok(())
 }

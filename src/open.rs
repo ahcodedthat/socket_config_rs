@@ -16,9 +16,6 @@ use std::{
 	path::Path,
 };
 
-#[cfg(unix)]
-use crate::unix_security::PreparedUnixSecurityAttributes;
-
 /// Opens a socket (or claims an inherited one), according to the given address and options.
 ///
 ///
@@ -80,8 +77,7 @@ pub fn open(
 
 		// Prepare any Unix security attributes, if relevant.
 		#[cfg(unix)]
-		let unix_security_attributes: Option<PreparedUnixSecurityAttributes> =
-			PreparedUnixSecurityAttributes::new(unix_socket_path, user_options)?;
+		crate::unix_security::prepare(user_options, unix_socket_path)?;
 
 		// Check if we need to `listen` on this socket, and if so, what the backlog should be.
 		let listen_backlog: Option<_> = {
@@ -144,9 +140,7 @@ pub fn open(
 
 		// Set security attributes on the socket, if applicable and configured.
 		#[cfg(unix)]
-		if let Some(unix_security_attributes) = unix_security_attributes {
-			unix_security_attributes.apply()?;
-		}
+		crate::unix_security::apply(user_options, &socket, unix_socket_path)?;
 
 		// Set the socket to listening, if applicable and configured.
 		if let Some(listen_backlog) = listen_backlog {

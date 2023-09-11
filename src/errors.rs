@@ -21,22 +21,8 @@ use {
 #[cfg(all(doc, feature = "tokio"))]
 use crate::convert::{AnyTokioListener, AnyTokioStream};
 
-#[cfg(all(doc, unix))]
-use crate::unix_security::UnixSocketPermissions;
-
 #[cfg(feature = "tokio")]
 use crate::convert::AnyStdSocket;
-
-/// An error in parsing [`UnixSocketPermissions`] [from a string][FromStr].
-///
-/// # Availability
-///
-/// Unix-like platforms only.
-#[cfg(unix)]
-#[derive(Debug, thiserror::Error)]
-#[error("unrecognized character in `unix_socket_permissions` (only the letters `u`, `g`, and `o`, or an octal mode number, are recognized)")]
-#[non_exhaustive]
-pub struct UnixSocketPermissionsParseError;
 
 /// An error parsing a [`SocketAddr`] [from a string][FromStr].
 #[derive(Debug, thiserror::Error)]
@@ -130,54 +116,6 @@ pub enum OpenSocketError {
 		/// The name of the option that is not applicable, as it appears in the API documentation, such as `ip_socket_reuse_port`.
 		name: &'static str,
 	},
-
-	/// [`SocketUserOptions::unix_socket_owner`] was used, but the named user could not be looked up.
-	///
-	/// # Availability
-	///
-	/// Unix-like platforms only.
-	#[cfg(unix)]
-	#[error("the `unix_socket_owner` option was used, but there was an error looking up the user ID: {error}")]
-	#[non_exhaustive]
-	LookupOwner {
-		/// The error that this one arose from.
-		#[source]
-		error: io::Error,
-	},
-
-	/// [`SocketUserOptions::unix_socket_owner`] was used, but no user with that name was found.
-	///
-	/// # Availability
-	///
-	/// Unix-like platforms only.
-	#[cfg(unix)]
-	#[error("the `unix_socket_owner` option was used, but no user with that name was found")]
-	#[non_exhaustive]
-	OwnerNotFound,
-
-	/// [`SocketUserOptions::unix_socket_group`] was used, but the named group could not be looked up.
-	///
-	/// # Availability
-	///
-	/// Unix-like platforms only.
-	#[cfg(unix)]
-	#[error("the `unix_socket_group` option was used, but there was an error looking up the group ID: {error}")]
-	#[non_exhaustive]
-	LookupUnixGroup {
-		/// The error that this one arose from.
-		#[source]
-		error: io::Error,
-	},
-
-	/// [`SocketUserOptions::unix_socket_group`] was used, but no group with that name was found.
-	///
-	/// # Availability
-	///
-	/// Unix-like platforms only.
-	#[cfg(unix)]
-	#[error("the `unix_socket_group` option was used, but no group with that name was found")]
-	#[non_exhaustive]
-	UnixGroupNotFound,
 
 	/// [`socket2::Socket::new`] failed.
 	#[error("couldn't create socket: {error}")]
@@ -317,13 +255,6 @@ impl From<OpenSocketError> for io::Error {
 			OpenSocketError::WindowsGetStdin { error } => error.kind(),
 
 			#[cfg(unix)]
-			| OpenSocketError::OwnerNotFound
-			| OpenSocketError::UnixGroupNotFound
-			=> EK::NotFound,
-
-			#[cfg(unix)]
-			| OpenSocketError::LookupOwner { error }
-			| OpenSocketError::LookupUnixGroup { error }
 			| OpenSocketError::SetOwner { error }
 			| OpenSocketError::SetPermissions { error }
 			=> error.kind(),

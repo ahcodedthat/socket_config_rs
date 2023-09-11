@@ -65,7 +65,7 @@ fn unix() {
 		let mut user_options = socket_config::SocketUserOptions::default();
 
 		#[cfg(unix)] {
-			user_options.unix_socket_permissions = Some(socket_config::unix_security::UnixSocketPermissions::try_from(0o660).unwrap());
+			user_options.unix_socket_permissions = Some(nix::sys::stat::Mode::from_bits(0o660).unwrap());
 		}
 
 		let (server_addr, server_thread) = echo_incr_server(
