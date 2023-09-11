@@ -33,7 +33,7 @@ pub struct SocketUserOptions {
 	#[cfg_attr(feature = "clap", arg(long))]
 	pub unix_socket_no_unlink: bool,
 
-	/// Permissions for created, path-based Unix-domain sockets. The default is to use the process umask (permission mask).
+	/// Permissions for the socket. The default is to use the process umask (permission mask).
 	///
 	/// This option applies only to non-inherited path-based Unix-domain sockets. Using it on any other kind of socket, such as a TCP socket or an inherited Unix-domain socket, is an error.
 	///
@@ -53,9 +53,9 @@ pub struct SocketUserOptions {
 	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::DeserMode>>"))]
 	pub unix_socket_permissions: Option<Mode>,
 
-	/// Owner for created, path-based Unix-domain sockets.
+	/// Owner for the socket.
 	///
-	/// This option is applicable only to path-based Unix-domain sockets that are being created. Using it on any other kind of socket, such as a TCP socket or an inherited Unix-domain socket, is an error.
+	/// This option is applicable only to non-inherited path-based Unix-domain sockets. Using it on any other kind of socket, such as a TCP socket or an inherited Unix-domain socket, is an error.
 	///
 	/// In order to change the owner of a file, including a Unix-domain socket, most operating systems require special privileges, such as the capability `CAP_CHOWN` on Linux.
 	///
@@ -75,9 +75,9 @@ pub struct SocketUserOptions {
 	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::DeserUid>>"))]
 	pub unix_socket_owner: Option<Uid>,
 
-	/// Group for created, path-based Unix-domain sockets.
+	/// Group for the socket.
 	///
-	/// This option is applicable only to path-based Unix-domain sockets that are being created. Using it on any other kind of socket, such as a TCP socket or an inherited Unix-domain socket, is an error.
+	/// This option is applicable only to non-inherited path-based Unix-domain sockets. Using it on any other kind of socket, such as a TCP socket or an inherited Unix-domain socket, is an error.
 	///
 	/// In order to change the group of a file, including a Unix-domain socket, most operating systems require the process to either be a member of that group or have special privileges, such as the capability `CAP_CHOWN` on Linux.
 	///
