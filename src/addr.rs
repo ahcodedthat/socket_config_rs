@@ -21,6 +21,9 @@ use crate::{
 	SocketAppOptions,
 };
 
+#[cfg(all(feature = "serde", test))]
+use assert_matches::assert_matches;
+
 /// The address to bind a socket to, or a description of an inherited socket to use. This is one of the three parameters to [`open`][crate::open()].
 ///
 /// This is somewhat like [`std::net::SocketAddr`], but has many more variants.
@@ -41,7 +44,7 @@ use crate::{
 ///
 /// All platforms. Deserializing with `serde` requires the `serde` feature.
 #[derive(Clone, Debug, Eq, derive_more::From, Hash, Ord, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr))]
+#[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr, serde_with::SerializeDisplay))]
 #[non_exhaustive]
 pub enum SocketAddr {
 	/// An Internet (IPv4 or IPv6) socket address.
@@ -205,6 +208,27 @@ impl SocketAddr {
 	}
 }
 
+fn str_is_unix_domain_socket_prefix(s: &str) -> bool {
+	s.starts_with('\\') ||
+	s.starts_with('/') ||
+	s.starts_with(r".\") ||
+	s.starts_with("./") ||
+	(
+		// Check if it's a Windows drive-letter path.
+		//
+		// Extract the first three bytes of the path.
+		s.as_bytes().get(0..=2)
+		// Convert the slice reference to an array reference. (Rust has a method for doing this without making a subslice first, but it's not stable yet.)
+		.and_then(|slice| <&[u8; 3]>::try_from(slice).ok())
+		// Now, check if those first three bytes fit the `X:\` pattern.
+		.is_some_and(|[letter, colon, backslash]| {
+			letter.is_ascii_alphabetic() &&
+			*colon == b':' &&
+			*backslash == b'\\'
+		})
+	)
+}
+
 impl FromStr for SocketAddr {
 	type Err = InvalidSocketAddrError;
 
@@ -272,26 +296,7 @@ impl FromStr for SocketAddr {
 		}
 
 		// See if it's a Unix-domain socket with a path.
-		if
-			s.starts_with('\\') ||
-			s.starts_with('/') ||
-			s.starts_with(r".\") ||
-			s.starts_with("./") ||
-			(
-				// Check if it's a Windows drive-letter path.
-				//
-				// Extract the first three bytes of the path.
-				s.as_bytes().get(0..=2)
-				// Convert the slice reference to an array reference. (Rust has a method for doing this without making a subslice first, but it's not stable yet.)
-				.and_then(|slice| <&[u8; 3]>::try_from(slice).ok())
-				// Now, check if those first three bytes fit the `X:\` pattern.
-				.is_some_and(|[letter, colon, backslash]| {
-					letter.is_ascii_alphabetic() &&
-					*colon == b':' &&
-					*backslash == b'\\'
-				})
-			)
-		{
+		if str_is_unix_domain_socket_prefix(s) {
 			return Ok(Self::Unix {
 				path: s.into(),
 			})
@@ -314,8 +319,22 @@ impl FromStr for SocketAddr {
 impl Display for SocketAddr {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
+			Self::Ip { addr }
+			if addr.port() == 0
+			=> write!(f, "{}", addr.ip()),
+
 			Self::Ip { addr } => write!(f, "{addr}"),
-			Self::Unix { path } => write!(f, "{}", path.display()),
+
+			Self::Unix { path } => {
+				let path = path.to_string_lossy();
+
+				if !str_is_unix_domain_socket_prefix(&path) {
+					write!(f, ".{}", std::path::MAIN_SEPARATOR)?;
+				}
+
+				write!(f, "{path}")
+			},
+
 			#[cfg(windows)] Self::Inherit { socket } => write!(f, "socket:{socket}"),
 			#[cfg(not(windows))] Self::Inherit { socket } => write!(f, "fd:{socket}"),
 			Self::InheritStdin {} => write!(f, "stdin"),
@@ -420,4 +439,115 @@ pub(crate) fn cleanup_unix_path_socket(path: &Path) -> Result<(), CleanupSocketE
 	}
 
 	Ok(())
+}
+
+#[test]
+fn test_serde() {
+	let mut abs_unix_path = std::env::current_dir().unwrap();
+	abs_unix_path.push("foo");
+
+	let rel_unix_path = format!(".{}foo", std::path::MAIN_SEPARATOR);
+
+	for (addr, expected_serialization, expected_roundtrip) in [
+		(
+			SocketAddr::Ip {
+				addr: std::net::SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 27910),
+			},
+			"127.0.0.1:27910",
+			None,
+		),
+
+		(
+			SocketAddr::Ip {
+				addr: std::net::SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+			},
+			"127.0.0.1",
+			None,
+		),
+
+		(
+			SocketAddr::Ip {
+				addr: std::net::SocketAddr::new(Ipv6Addr::from(0x2607_f8b0_400a_0804_0000_0000_0000_200e_u128).into(), 27910),
+			},
+			"[2607:f8b0:400a:804::200e]:27910",
+			None,
+		),
+
+		(
+			SocketAddr::Ip {
+				addr: std::net::SocketAddr::new(Ipv6Addr::from(0x2607_f8b0_400a_0804_0000_0000_0000_200e_u128).into(), 0),
+			},
+			"2607:f8b0:400a:804::200e",
+			None,
+		),
+
+		(
+			// If `SocketAddr::Unix::path` is a plain relative path with no recognized prefix, a prefix will be added, and preserved upon round trip.
+			SocketAddr::Unix {
+				path: "foo".into(),
+			},
+
+			&rel_unix_path,
+
+			Some(SocketAddr::Unix {
+				path: rel_unix_path.clone().into(),
+			}),
+		),
+
+		(
+			SocketAddr::Unix {
+				path: abs_unix_path.clone(),
+			},
+			abs_unix_path.to_str().unwrap(),
+			None,
+		),
+
+		(
+			SocketAddr::Inherit {
+				socket: 31337,
+			},
+
+			#[cfg(windows)]
+			"socket:31337",
+
+			#[cfg(not(windows))]
+			"fd:31337",
+
+			None,
+		),
+
+		(
+			SocketAddr::InheritStdin,
+			"stdin",
+			None,
+		),
+
+		#[cfg(not(windows))]
+		(
+			SocketAddr::SystemdNumeric {
+				socket: 3,
+			},
+			"systemd:3",
+			None,
+		),
+	] {
+		let expected_roundtrip: &SocketAddr = expected_roundtrip.as_ref().unwrap_or(&addr);
+
+		assert_eq!(addr.to_string(), expected_serialization);
+		assert_eq!(&SocketAddr::from_str(expected_serialization).unwrap(), expected_roundtrip);
+
+		#[cfg(feature = "serde")] {
+			let serialized = serde_json::to_value(&addr).unwrap();
+			assert_matches!(
+				&serialized,
+				serde_json::Value::String(string)
+				if string == expected_serialization
+			);
+
+			assert_eq!(
+				&serde_json::from_value::<SocketAddr>(serialized).unwrap(),
+				expected_roundtrip,
+			);
+		}
+	}
 }

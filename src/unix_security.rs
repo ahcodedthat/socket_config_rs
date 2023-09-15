@@ -47,28 +47,13 @@ mod parse_common {
 
 	#[test]
 	fn test_parse_mode() {
-		assert_eq!(
-			parse_mode("644").unwrap(),
-			Mode::from_bits(0o644).unwrap(),
-		);
-
 		let _ = parse_mode("77777").unwrap_err();
-
-		#[cfg(feature = "serde")]
-		#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
-		struct ModeDeser(
-			#[serde(with = "serde_with::As::<super::DeserMode>")]
-			Mode
-		);
-
-		#[cfg(feature = "serde")]
-		assert_eq!(
-			serde_json::from_str::<ModeDeser>("420").unwrap(),
-			ModeDeser(Mode::from_bits(420).unwrap()),
-		);
 
 		for (string, bits) in [
 			("", 0),
+			("-", 0),
+			("0", 0),
+			("420", 0o420),
 			("u", 0o600),
 			("g", 0o060),
 			("ug", 0o660),
@@ -76,33 +61,22 @@ mod parse_common {
 			("uo", 0o606),
 			("go", 0o066),
 			("ugo", 0o666),
+			("-u-g-o-", 0o666),
 		] {
 			assert_eq!(
 				parse_mode(string).unwrap().bits(),
 				bits,
 			);
-
-			#[cfg(feature = "serde")]
-			for json_repr in [
-				format!("\"{string}\""),
-				format!("{bits}"),
-				format!("\"{bits:o}\""),
-			] {
-				assert_eq!(
-					serde_json::from_str::<ModeDeser>(&json_repr).unwrap().0.bits(),
-					bits,
-				);
-			}
 		}
 	}
 
-	#[cfg_attr(feature = "serde", derive(serde::Deserialize), serde(rename = "UnixPrincipal", untagged))]
-	pub(super) enum DeserUnixPrincipal<'a, I> {
+	#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize), serde(rename = "UnixPrincipal", untagged))]
+	pub(super) enum SerdeUnixPrincipal<'a, I> {
 		Id(I),
 		Name(&'a str),
 	}
 
-	impl<'a> DeserUnixPrincipal<'a, uid_t> {
+	impl<'a> SerdeUnixPrincipal<'a, uid_t> {
 		pub(super) fn to_uid(self) -> Result<Uid, UnixPrincipalLookupError> {
 			match self {
 				Self::Id(id) => Ok(Uid::from_raw(id)),
@@ -120,7 +94,7 @@ mod parse_common {
 		}
 	}
 
-	impl<'a> DeserUnixPrincipal<'a, gid_t> {
+	impl<'a> SerdeUnixPrincipal<'a, gid_t> {
 		pub(super) fn to_gid(self) -> Result<Gid, UnixPrincipalLookupError> {
 			match self {
 				Self::Id(id) => Ok(Gid::from_raw(id)),
@@ -211,26 +185,33 @@ mod parse_common {
 		}
 
 		#[cfg(feature = "serde")] {
-			#[derive(Debug, serde::Deserialize, Eq, PartialEq)]
+			#[derive(Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
 			struct UserAndGroup {
-				#[serde(with = "serde_with::As::<DeserUid>")]
+				#[serde(with = "serde_with::As::<SerdeUid>")]
 				user: Uid,
 
-				#[serde(with = "serde_with::As::<DeserGid>")]
+				#[serde(with = "serde_with::As::<SerdeGid>")]
 				group: Gid,
 			}
 
-			assert_eq!(
-				serde_json::from_str::<UserAndGroup>(&format!(r#"{{
-					"user": {my_uid},
-					"group": {my_gid}
-				}}"#)).unwrap(),
+			let de = UserAndGroup {
+				user: my_uid,
+				group: my_gid,
+			};
 
-				UserAndGroup {
-					user: my_uid,
-					group: my_gid,
-				},
-			);
+			{
+				let ser = format!(r#"{{"user":{my_uid},"group":{my_gid}}}"#);
+
+				assert_eq!(
+					serde_json::from_str::<UserAndGroup>(&ser).unwrap(),
+					de,
+				);
+
+				assert_eq!(
+					serde_json::to_string(&de).unwrap(),
+					ser,
+				);
+			}
 
 			assert_eq!(
 				serde_json::from_str::<UserAndGroup>(&format!(r#"{{
@@ -238,10 +219,7 @@ mod parse_common {
 					"group": "{my_group}"
 				}}"#)).unwrap(),
 
-				UserAndGroup {
-					user: my_uid,
-					group: my_gid,
-				},
+				de,
 			);
 		}
 	}
@@ -260,10 +238,10 @@ mod from_str {
 	pub fn parse_uid(user: &str) -> Result<Uid, UnixPrincipalLookupError> {
 		let principal = {
 			if let Ok(id) = uid_t::from_str(user) {
-				DeserUnixPrincipal::Id(id)
+				SerdeUnixPrincipal::Id(id)
 			}
 			else {
-				DeserUnixPrincipal::Name(user)
+				SerdeUnixPrincipal::Name(user)
 			}
 		};
 
@@ -273,10 +251,10 @@ mod from_str {
 	pub fn parse_gid(group: &str) -> Result<Gid, UnixPrincipalLookupError> {
 		let principal = {
 			if let Ok(id) = gid_t::from_str(group) {
-				DeserUnixPrincipal::Id(id)
+				SerdeUnixPrincipal::Id(id)
 			}
 			else {
-				DeserUnixPrincipal::Name(group)
+				SerdeUnixPrincipal::Name(group)
 			}
 		};
 
@@ -298,13 +276,16 @@ mod from_serde {
 		de::Error as _,
 		Deserialize,
 		Deserializer,
+		Serialize,
+		Serializer,
 	};
-	use serde_with::DeserializeAs;
+	use serde_with::{DeserializeAs, SerializeAs};
 	use std::fmt;
 	use super::*;
 
-	pub struct DeserMode;
-	impl<'de> DeserializeAs<'de, Mode> for DeserMode {
+	pub struct SerdeMode;
+
+	impl<'de> DeserializeAs<'de, Mode> for SerdeMode {
 		fn deserialize_as<D: Deserializer<'de>>(de: D) -> Result<Mode, D::Error> {
 			struct Visitor;
 
@@ -367,21 +348,131 @@ mod from_serde {
 		}
 	}
 
-	pub struct DeserUid;
-	impl<'de> DeserializeAs<'de, Uid> for DeserUid {
+	impl SerializeAs<Mode> for SerdeMode {
+		fn serialize_as<S: Serializer>(mode: &Mode, ser: S) -> Result<S::Ok, S::Error> {
+			let bits = mode.bits();
+
+			let str: Option<&str> = match bits {
+				// Only a handful of bit patterns have a string representation, so we'll just use a lookup table.
+				0 => Some("-"),
+				0o006 => Some("o"),
+				0o060 => Some("g"),
+				0o066 => Some("go"),
+				0o600 => Some("u"),
+				0o606 => Some("uo"),
+				0o660 => Some("ug"),
+				0o666 => Some("ugo"),
+				_ => None,
+			};
+
+			if let Some(str) = str {
+				ser.serialize_str(str)
+			}
+			else {
+				bits.serialize(ser)
+			}
+		}
+	}
+
+	#[test]
+	fn test_mode() {
+		#[derive(Debug, serde::Deserialize, Eq, PartialEq, serde::Serialize)]
+		struct SerdeModeContainer(
+			#[serde(with = "serde_with::As::<SerdeMode>")]
+			Mode
+		);
+
+		for (serialization, expected_deserialization, expected_serialization) in [
+			(
+				0u32.into(),
+				0,
+				Some("-".into()),
+			),
+			(
+				"-".into(),
+				0,
+				None,
+			),
+			(
+				"0".into(),
+				0,
+				Some("-".into()),
+			),
+			(
+				"".into(),
+				0,
+				Some("-".into()),
+			),
+			(
+				0o600u32.into(),
+				0o600,
+				Some("u".into()),
+			),
+			(
+				"-u-g-".into(),
+				0o660,
+				Some("ug".into()),
+			),
+			(
+				0o420u32.into(),
+				0o420,
+				None,
+			),
+			(
+				"420".into(),
+				0o420,
+				Some(0o420u32.into()),
+			),
+			(  "u".into(), 0o600, None),
+			(  "g".into(), 0o060, None),
+			( "ug".into(), 0o660, None),
+			(  "o".into(), 0o006, None),
+			( "uo".into(), 0o606, None),
+			( "go".into(), 0o066, None),
+			("ugo".into(), 0o666, None),
+		] {
+			let serialization: serde_json::Value = serialization;
+			let expected_serialization: Option<serde_json::Value> = expected_serialization;
+
+			let expected_serialization: serde_json::Value = expected_serialization.unwrap_or_else(|| serialization.clone());
+
+			let deserialized: SerdeModeContainer = serde_json::from_value(serialization).unwrap();
+			assert_eq!(deserialized.0.bits(), expected_deserialization);
+
+			let reserialized = serde_json::to_value(&deserialized).unwrap();
+			assert_eq!(reserialized, expected_serialization);
+		}
+	}
+
+	pub struct SerdeUid;
+
+	impl<'de> DeserializeAs<'de, Uid> for SerdeUid {
 		fn deserialize_as<D: Deserializer<'de>>(de: D) -> Result<Uid, D::Error> {
-			let principal = DeserUnixPrincipal::<uid_t>::deserialize(de)?;
+			let principal = SerdeUnixPrincipal::<uid_t>::deserialize(de)?;
 
 			principal.to_uid().map_err(D::Error::custom)
 		}
 	}
 
-	pub struct DeserGid;
-	impl<'de> DeserializeAs<'de, Gid> for DeserGid {
+	impl SerializeAs<Uid> for SerdeUid {
+		fn serialize_as<S: Serializer>(uid: &Uid, ser: S) -> Result<S::Ok, S::Error> {
+			uid.as_raw().serialize(ser)
+		}
+	}
+
+	pub struct SerdeGid;
+
+	impl<'de> DeserializeAs<'de, Gid> for SerdeGid {
 		fn deserialize_as<D: Deserializer<'de>>(de: D) -> Result<Gid, D::Error> {
-			let principal = DeserUnixPrincipal::<gid_t>::deserialize(de)?;
+			let principal = SerdeUnixPrincipal::<gid_t>::deserialize(de)?;
 
 			principal.to_gid().map_err(D::Error::custom)
+		}
+	}
+
+	impl SerializeAs<Gid> for SerdeGid {
+		fn serialize_as<S: Serializer>(gid: &Gid, ser: S) -> Result<S::Ok, S::Error> {
+			gid.as_raw().serialize(ser)
 		}
 	}
 }

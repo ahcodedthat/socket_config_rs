@@ -18,9 +18,10 @@ use crate::SocketAddr;
 
 This structure is suitable for deserializing with [`serde`], with one caveat: it is marked with the attribute `#[serde(deny_unknown_fields)]`, and therefore must not be referenced in a field marked `#[serde(flatten)]`.
 "#)]
+#[cfg_attr(feature = "serde", serde_with::skip_serializing_none)]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "clap", derive(clap::Args))]
-#[cfg_attr(feature = "serde", derive(serde::Deserialize), serde(default, deny_unknown_fields))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize), serde(default, deny_unknown_fields))]
 #[non_exhaustive]
 pub struct SocketUserOptions {
 	/// Prevents the deletion of the existing socket, if any.
@@ -50,7 +51,7 @@ pub struct SocketUserOptions {
 	/// Unix-like platforms. Using this option on other platforms is an error.
 	#[cfg(unix)]
 	#[cfg_attr(feature = "clap", arg(long, value_parser = crate::unix_security::parse_mode))]
-	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::DeserMode>>"))]
+	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::SerdeMode>>"))]
 	pub unix_socket_permissions: Option<Mode>,
 
 	/// Owner for the socket.
@@ -72,7 +73,7 @@ pub struct SocketUserOptions {
 	/// Unix-like platforms. Using this option on other platforms is an error.
 	#[cfg(unix)]
 	#[cfg_attr(feature = "clap", arg(long, value_parser = crate::unix_security::parse_uid))]
-	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::DeserUid>>"))]
+	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::SerdeUid>>"))]
 	pub unix_socket_owner: Option<Uid>,
 
 	/// Group for the socket.
@@ -94,7 +95,7 @@ pub struct SocketUserOptions {
 	/// Unix-like platforms. Using this option on other platforms is an error.
 	#[cfg(unix)]
 	#[cfg_attr(feature = "clap", arg(long, value_parser = crate::unix_security::parse_gid))]
-	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::DeserGid>>"))]
+	#[cfg_attr(feature = "serde", serde(with = "serde_with::As::<Option<crate::unix_security::SerdeGid>>"))]
 	pub unix_socket_group: Option<Gid>,
 
 	/// Set the socket option `SO_REUSEPORT`, which allows multiple processes to receive connections or packets on the same port.
