@@ -39,6 +39,8 @@ use assert_matches::assert_matches;
 * From a serialization format supported by [`serde`]. The serialized representation is expected to be a string, also using the syntax described in the aforementioned “Syntax” sections.
 "#)]
 ///
+/// The [`Default`] for this type is the IPv4 address 127.0.0.1, port zero.
+///
 ///
 /// # Availability
 ///
@@ -243,6 +245,14 @@ fn str_is_unix_domain_socket_prefix(s: &str) -> bool {
 			*backslash == b'\\'
 		})
 	)
+}
+
+impl Default for SocketAddr {
+	fn default() -> Self {
+		Self::Ip {
+			addr: std::net::SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+		}
+	}
 }
 
 impl FromStr for SocketAddr {
