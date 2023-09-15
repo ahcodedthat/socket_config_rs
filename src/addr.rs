@@ -199,6 +199,22 @@ impl SocketAddr {
 		Ok(())
 	}
 
+	/// Resolves relative file paths in this `SocketAddr`.
+	///
+	/// Specifically, if this is a [`SocketAddr::Unix`] and its `path` is relative, it is resolved against the provided `base_dir` using [`Path::join`].
+	pub fn resolve_base_dir(&mut self, base_dir: &Path) {
+		let do_resolve = |path_to_resolve: &mut PathBuf| {
+			if !path_to_resolve.is_absolute() {
+				*path_to_resolve = base_dir.join(&path_to_resolve);
+			}
+		};
+
+		match self {
+			Self::Unix { path } => do_resolve(path),
+			_ => {}
+		}
+	}
+
 	fn from_std_ip(addr: IpAddr) -> Self {
 		Self::from_std_ip_port(std::net::SocketAddr::new(addr, 0))
 	}
