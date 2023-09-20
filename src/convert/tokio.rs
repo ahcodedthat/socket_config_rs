@@ -203,6 +203,23 @@ impl futures::Stream for AnyTokioListener {
 	}
 }
 
+#[cfg(feature = "tls-listener")]
+impl tls_listener::AsyncAccept for AnyTokioListener {
+	type Connection = AnyTokioStream;
+	type Error = io::Error;
+
+	fn poll_accept(
+		self: Pin<&mut Self>,
+		cx: &mut task::Context,
+	) -> task::Poll<Option<Result<Self::Connection, Self::Error>>> {
+		(&*self).poll_accept(cx)
+		.map(|result: io::Result<(AnyTokioStream, SockAddr)>| {
+			let result: io::Result<AnyTokioStream> = result.map(|(socket, _)| socket);
+			Some(result)
+		})
+	}
+}
+
 #[cfg(not(windows))]
 impl AsFd for AnyTokioListener {
 	fn as_fd(&self) -> BorrowedFd {
