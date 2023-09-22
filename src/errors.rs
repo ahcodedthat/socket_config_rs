@@ -221,6 +221,11 @@ pub enum OpenSocketError {
 	#[error("the inherited socket was expected to not be in a listening state, but it is")]
 	#[non_exhaustive]
 	InheritedIsListening,
+
+	/// The [`SocketAddr`] is a [`SocketAddr::Ip`] with no port number, but [`SocketAppOptions::default_port`] is `None`.
+	#[error("a port number is required")]
+	#[non_exhaustive]
+	PortRequired,
 }
 
 impl From<OpenSocketError> for io::Error {
@@ -232,6 +237,7 @@ impl From<OpenSocketError> for io::Error {
 			OpenSocketError::InapplicableUserOption { .. } => EK::InvalidInput,
 			OpenSocketError::InheritedIsListening          => EK::InvalidData ,
 			OpenSocketError::InheritedIsNotListening       => EK::InvalidData ,
+			OpenSocketError::PortRequired                  => EK::InvalidData ,
 
 			| OpenSocketError::InvalidUnixPath { error }
 			| OpenSocketError::DupInherited { error }

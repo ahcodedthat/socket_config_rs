@@ -212,8 +212,13 @@ pub fn open(
 		SocketAddr::Ip { addr } => {
 			let mut addr: std::net::SocketAddr = *addr;
 
-			if addr.port() == 0 && app_options.default_port != 0 {
-				addr.set_port(app_options.default_port);
+			if addr.port() == 0 {
+				if let Some(default_port) = app_options.default_port {
+					addr.set_port(default_port);
+				}
+				else {
+					return Err(OpenSocketError::PortRequired);
+				}
 			}
 
 			open_new(addr.into())?

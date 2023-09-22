@@ -91,11 +91,12 @@ fn unix() {
 fn udp() {
 	let mut app_options = socket_config::SocketAppOptions::new(socket2::Type::DGRAM);
 	app_options.protocol = Some(socket2::Protocol::UDP);
+	app_options.default_port = Some(0);
 
 	let user_options = socket_config::SocketUserOptions::default();
 
 	let (server_addr, server_thread) = echo_incr_server(
-		&"127.0.0.1:0".parse().unwrap(),
+		&"127.0.0.1".parse().unwrap(),
 		&app_options,
 		&user_options
 	);

@@ -162,10 +162,14 @@ pub struct SocketAppOptions<'a> {
 	/// All platforms, but the aforementioned check of inherited sockets' listening state only occurs on sufficiently recent versions of AIX, Android, FreeBSD, Fuchsia, and Linux. Other platforms do not support checking the listening state of an existing socket. On those platforms, this option is ignored for inherited sockets.
 	pub listen: bool,
 
-	/// Default port number for TCP or UDP sockets. Default is zero.
+	/// Default port number for TCP or UDP sockets. Default is `None`.
 	///
-	/// If this is *not* zero, then when a [`SocketAddr::Ip`] with a port number of zero is [opened][crate::open()], this `default_port` will be used instead. This allows, for example, a web server to default to port 80 if the user doesn't supply an explicit port number.
-	pub default_port: u16,
+	/// This port number is used when a [`SocketAddr::Ip`] with a port number of zero is [opened][crate::open()]. This allows, for example, a web server to default to port 80 if the user doesn't supply an explicit port number.
+	///
+	/// If this is `None`, then the user must explicitly supply a port number; leaving it out is an error.
+	///
+	/// If this is `Some(0)`, then an ephemeral port is used if the user does not supply a port number.
+	pub default_port: Option<u16>,
 
 	/// A function that is called just before binding the newly created socket to its address. It is not called if the socket is inherited (such sockets are assumed to already be bound).
 	#[allow(clippy::type_complexity)] // In my opinion, the complexity of this field's type is preferable to polluting the API documentation with a type alias.
@@ -179,7 +183,7 @@ impl<'a> SocketAppOptions<'a> {
 			r#type,
 			protocol: None,
 			listen: true,
-			default_port: 0,
+			default_port: None,
 			before_bind: None,
 		}
 	}
