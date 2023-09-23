@@ -1,3 +1,4 @@
+use cfg_if::cfg_if;
 use socket2::Socket;
 use std::{
 	ffi::c_int,
@@ -119,20 +120,29 @@ pub struct SocketUserOptions {
 	#[cfg_attr(feature = "clap", arg(long))]
 	pub ip_socket_v6_only: bool,
 
-	/// Maximum pending connections, for listening sockets. Default is 128.
+	/// Maximum pending connections, for listening sockets. Default is 20 on Nintendo 3DS, 128 on other platforms.
 	///
 	/// This option only has an effect on non-inherited [stream-type][socket2::Type::STREAM] listening sockets, and is ignored for all others.
 	///
 	/// # Availability
 	///
-	/// All platforms.
+	/// All platforms. As mentioned above, the default is different on Nintendo 3DS (`cfg(target_os = "horizon")`), because of the limitations of that platform; see [this comment in the Rust standard library source code](https://github.com/rust-lang/rust/blob/1b225414f325593f974c6b41e671a0a0dc5d7d5e/library/std/src/sys_common/net.rs#L411) for details.
 	#[cfg_attr(feature = "clap", arg(long))]
 	pub listen_socket_backlog: Option<c_int>,
 }
 
 impl SocketUserOptions {
 	/// The default value used when [`SocketUserOptions::listen_socket_backlog`] is `None`.
-	pub const DEFAULT_LISTEN_SOCKET_BACKLOG: c_int = 128;
+	pub const DEFAULT_LISTEN_SOCKET_BACKLOG: c_int = {
+		cfg_if! {
+			if #[cfg(target_os = "horizon")] {
+				20
+			}
+			else {
+				128
+			}
+		}
+	};
 }
 
 /// Options for opening a socket, supplied by your application itself. This is one of the three parameters to [`open`][crate::open()].
