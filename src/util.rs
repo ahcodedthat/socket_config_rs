@@ -1,5 +1,6 @@
 use crate::{
 	errors::OpenSocketError,
+	SocketAppOptions,
 	sys,
 };
 use socket2::Socket;
@@ -133,3 +134,26 @@ pub(crate) static TEST_SCRATCH: Lazy<PathBuf> = Lazy::new(|| {
 
 	path
 });
+
+#[cfg(not(windows))]
+pub(crate) fn is_socket_probably_tcp(
+	socket: &Socket,
+	local_addr: &socket2::SockAddr,
+	app_options: &SocketAppOptions,
+) -> bool {
+	if let Some(protocol) = app_options.protocol {
+		return protocol == socket2::Protocol::TCP;
+	}
+
+	#[cfg(any(
+		target_os = "android",
+		target_os = "freebsd",
+		target_os = "fuchsia",
+		target_os = "linux",
+	))]
+	if let Ok(Some(protocol)) = socket.protocol() {
+		return protocol == socket2::Protocol::TCP;
+	}
+
+	app_options.r#type == socket2::Type::STREAM && (local_addr.is_ipv4() || local_addr.is_ipv6())
+}

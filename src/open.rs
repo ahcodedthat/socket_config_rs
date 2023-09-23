@@ -5,10 +5,7 @@ use crate::{
 	SocketAddr,
 	SocketUserOptions,
 	sys,
-	util::{
-		check_inapplicable,
-		check_inapplicable_bool,
-	},
+	util::*,
 };
 use socket2::Socket;
 use std::{
@@ -112,6 +109,17 @@ pub fn open(
 		}
 
 		// Set socket options.
+
+		// `SO_REUSEADDR` is only set for TCP listening sockets on non-Windows platforms, same as the Rust standard library. See explanation: https://github.com/rust-lang/rust/blob/1b225414f325593f974c6b41e671a0a0dc5d7d5e/library/std/src/sys_common/net.rs#L395
+		#[cfg(not(windows))]
+		if listen_backlog.is_some() && is_socket_probably_tcp(&socket, &address, app_options) {
+			socket.set_reuse_address(true)
+			.map_err(|error| OpenSocketError::SetSockOpt {
+				option: "SO_REUSEADDR",
+				error,
+			})?;
+		}
+
 		#[cfg(all(unix, not(any(target_os = "solaris", target_os = "illumos"))))]
 		if user_options.ip_socket_reuse_port {
 			socket.set_reuse_port(true)
