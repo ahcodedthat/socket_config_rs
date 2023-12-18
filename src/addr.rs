@@ -62,11 +62,15 @@ pub enum SocketAddr {
 	/// * `1::2`, a non-bracketed IPv6 address without port number
 	/// * `[1::2]:3`, a bracketed IPv6 address with port number
 	///
-	/// If no port number is given, it defaults to 0, but see [`SocketAppOptions::default_port`].
+	/// If no port number is given, then [`SocketAppOptions::default_port`] is used as the port number instead. If that is also `None`, then an error occurs.
 	#[non_exhaustive]
+	#[from(ignore)]
 	Ip {
-		/// The IP address and port.
-		addr: std::net::SocketAddr,
+		/// The IP address.
+		addr: std::net::IpAddr,
+
+		/// The port, if any.
+		port: Option<u16>,
 	},
 
 	/// A Unix-domain socket at the given path.
@@ -218,11 +222,17 @@ impl SocketAddr {
 	}
 
 	fn from_std_ip(addr: IpAddr) -> Self {
-		Self::from_std_ip_port(std::net::SocketAddr::new(addr, 0))
+		Self::Ip {
+			addr,
+			port: None,
+		}
 	}
 
 	fn from_std_ip_port(addr: std::net::SocketAddr) -> Self {
-		Self::Ip { addr }
+		Self::Ip {
+			addr: addr.ip(),
+			port: Some(addr.port()),
+		}
 	}
 }
 
@@ -250,7 +260,8 @@ fn str_is_unix_domain_socket_prefix(s: &str) -> bool {
 impl Default for SocketAddr {
 	fn default() -> Self {
 		Self::Ip {
-			addr: std::net::SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+			addr: Ipv4Addr::LOCALHOST.into(),
+			port: None,
 		}
 	}
 }
@@ -329,27 +340,30 @@ impl FromStr for SocketAddr {
 		}
 
 		// Assume anything else must be an IP address with optional port number. Try to parse it as that. If that fails, signal that the address is unrecognized.
-		Ok(Self::Ip {
-			addr: {
-				IpAddr::from_str(s)
-				.map(|ip_addr| std::net::SocketAddr::new(ip_addr, 0))
-				.or_else(|_| std::net::SocketAddr::from_str(s))
-				.map_err(|ip_error| InvalidSocketAddrError::Unrecognized {
-					ip_error,
-				})?
-			},
-		})
+
+		// See if it's an IP address without port number.
+		if let Ok(addr) = IpAddr::from_str(s) {
+			return Ok(addr.into());
+		}
+
+		// See if it's an IP address with port number.
+		match std::net::SocketAddr::from_str(s) {
+			Ok(addr) => Ok(addr.into()),
+
+			// If not, then give up.
+			Err(ip_error) => Err(InvalidSocketAddrError::Unrecognized {
+				ip_error,
+			}),
+		}
 	}
 }
 
 impl Display for SocketAddr {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Ip { addr }
-			if addr.port() == 0
-			=> write!(f, "{}", addr.ip()),
+			Self::Ip { addr, port: None } => write!(f, "{addr}"),
 
-			Self::Ip { addr } => write!(f, "{addr}"),
+			Self::Ip { addr, port: Some(port) } => write!(f, "{}", std::net::SocketAddr::new(*addr, *port)),
 
 			Self::Unix { path } => {
 				let path = path.to_string_lossy();
@@ -396,6 +410,12 @@ impl From<SocketAddrV4> for SocketAddr {
 impl From<SocketAddrV6> for SocketAddr {
 	fn from(addr: SocketAddrV6) -> Self {
 		Self::from_std_ip_port(std::net::SocketAddr::from(addr))
+	}
+}
+
+impl From<std::net::SocketAddr> for SocketAddr {
+	fn from(addr: std::net::SocketAddr) -> Self {
+		Self::from_std_ip_port(addr)
 	}
 }
 
@@ -477,7 +497,8 @@ fn test_serde() {
 	for (addr, expected_serialization, expected_roundtrip) in [
 		(
 			SocketAddr::Ip {
-				addr: std::net::SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 27910),
+				addr: Ipv4Addr::LOCALHOST.into(),
+				port: Some(27910),
 			},
 			"127.0.0.1:27910",
 			None,
@@ -485,7 +506,8 @@ fn test_serde() {
 
 		(
 			SocketAddr::Ip {
-				addr: std::net::SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 0),
+				addr: Ipv4Addr::LOCALHOST.into(),
+				port: None,
 			},
 			"127.0.0.1",
 			None,
@@ -493,7 +515,17 @@ fn test_serde() {
 
 		(
 			SocketAddr::Ip {
-				addr: std::net::SocketAddr::new(Ipv6Addr::from(0x2607_f8b0_400a_0804_0000_0000_0000_200e_u128).into(), 27910),
+				addr: Ipv4Addr::LOCALHOST.into(),
+				port: Some(0),
+			},
+			"127.0.0.1:0",
+			None,
+		),
+
+		(
+			SocketAddr::Ip {
+				addr: Ipv6Addr::from(0x2607_f8b0_400a_0804_0000_0000_0000_200e_u128).into(),
+				port: Some(27910),
 			},
 			"[2607:f8b0:400a:804::200e]:27910",
 			None,
@@ -501,7 +533,17 @@ fn test_serde() {
 
 		(
 			SocketAddr::Ip {
-				addr: std::net::SocketAddr::new(Ipv6Addr::from(0x2607_f8b0_400a_0804_0000_0000_0000_200e_u128).into(), 0),
+				addr: Ipv6Addr::from(0x2607_f8b0_400a_0804_0000_0000_0000_200e_u128).into(),
+				port: Some(0),
+			},
+			"[2607:f8b0:400a:804::200e]:0",
+			None,
+		),
+
+		(
+			SocketAddr::Ip {
+				addr: Ipv6Addr::from(0x2607_f8b0_400a_0804_0000_0000_0000_200e_u128).into(),
+				port: None,
 			},
 			"2607:f8b0:400a:804::200e",
 			None,

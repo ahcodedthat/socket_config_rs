@@ -217,17 +217,13 @@ pub fn open(
 	};
 
 	let socket: Socket = match address {
-		SocketAddr::Ip { addr } => {
-			let mut addr: std::net::SocketAddr = *addr;
+		SocketAddr::Ip { addr, port } => {
+			let port: u16 =
+				(*port)
+				.or(app_options.default_port)
+				.ok_or(OpenSocketError::PortRequired)?;
 
-			if addr.port() == 0 {
-				if let Some(default_port) = app_options.default_port {
-					addr.set_port(default_port);
-				}
-				else {
-					return Err(OpenSocketError::PortRequired);
-				}
-			}
+			let addr = std::net::SocketAddr::new(*addr, port);
 
 			open_new(addr.into())?
 		}
