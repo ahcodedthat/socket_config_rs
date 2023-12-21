@@ -48,13 +48,13 @@ pub(crate) fn check_inapplicable_bool(option: bool, name: &'static str) -> Resul
 /// If this function is successful, the return value is the file descriptor or handle to pass to the child process.
 ///
 ///
-/// # Background
+/// # Warning: Not Thread Safe
 ///
-/// Rust socket libraries, including [the standard library][std], typically create non-inheritable sockets. When spawning a subprocess from a Rust program (such as an integration test) that is to inherit a socket from the parent process, the socket must be made inheritable first.
+/// When a socket is marked as inheritable, it is inherited by *any and all* child processes spawned afterward, until the socket is closed or marked non-inheritable. In a multithreaded program that spawns child processes from more than one thread at the same time, this can result in a socket intended for one child process being also inherited by another child process.
 ///
-/// On Windows, handles (including but not limited to sockets) [can be inherited](https://learn.microsoft.com/en-us/windows/win32/sysinfo/handle-inheritance), but two conditions must be met: the handle's `bInheritHandle` attribute must be set to true, and when the child process is created, the [`CreateProcess`](https://learn.microsoft.com/en-us/windows/desktop/api/processthreadsapi/nf-processthreadsapi-createprocessa) parameter `bInheritHandles` must be set to true. This function fulfills the former requirement using the [`SetHandleInformation`](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-sethandleinformation) function. The latter requirement is already fulfilled by [`std::process::Command`], whose subprocess-spawning methods always set the `CreateProcess` parameter `bInheritHandles` to true.
+/// It is possible to avoid this problem on Unix-like platforms, by making the socket inheritable after `fork` but before `exec`. (See [`std::os::unix::process::CommandExt::pre_exec`](https://doc.rust-lang.org/stable/std/os/unix/process/trait.CommandExt.html#tymethod.pre_exec) for how to do so with [`std::process::Command`].) A convenient API for doing that may be added to a future version of this library.
 ///
-/// On Unix-like platforms, file descriptors (including but not limited to sockets) can be inherited, but only if the `CLOEXEC` flag is not set. Rust socket libraries always create sockets with the `CLOEXEC` flag set. This function sets or clears it using the `fcntl` system call.
+/// On Windows, however, it appears to be impossible to solve this problem. There is a way to control which sockets (or other handles) are inherited by a child process (the `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` attribute for the Windows API function [`UpdateProcThreadAttribute`](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute)), but all such handles must be marked as inheritable first, and unfortunately, child processes inherit all inheritable handles by default. In other words, `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` can only filter out inheritable handles when creating a child process; it cannot make a handle inheritable only by that specific child process.
 ///
 ///
 /// # Availability
@@ -62,10 +62,20 @@ pub(crate) fn check_inapplicable_bool(option: bool, name: &'static str) -> Resul
 /// All platforms.
 ///
 /// Socket inheritance on Windows only works if there are no [Layered Service Providers](https://en.wikipedia.org/wiki/Layered_Service_Provider) (LSPs) installed. In the past, LSPs were commonly used by Windows security software to inspect network traffic. LSPs were replaced by the [Windows Filtering Platform](https://en.wikipedia.org/wiki/Windows_Filtering_Platform) in Windows Vista and have been deprecated since Windows Server 2012, though as of 2022 they are still supported for backward compatibility reasons. Therefore, inherited sockets are likely but not guaranteed to work on modern Windows systems, and unlikely to work on legacy Windows systems.
+///
+///
+/// # Background
+///
+/// Rust socket libraries, including [the standard library][std], typically create non-inheritable sockets. When spawning a subprocess from a Rust program (such as an integration test) that is to inherit a socket from the parent process, the socket must be made inheritable first.
+///
+/// On Windows, handles (including but not limited to sockets) [can be inherited](https://learn.microsoft.com/en-us/windows/win32/sysinfo/handle-inheritance), but two conditions must be met: the handle's `bInheritHandle` attribute must be set to true, and when the child process is created, the [`CreateProcess`](https://learn.microsoft.com/en-us/windows/desktop/api/processthreadsapi/nf-processthreadsapi-createprocessa) parameter `bInheritHandles` must be set to true. This function fulfills the former requirement using the [`SetHandleInformation`](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-sethandleinformation) function. The latter requirement is already fulfilled by [`std::process::Command`], whose subprocess-spawning methods always set the `CreateProcess` parameter `bInheritHandles` to true.
+///
+/// On Unix-like platforms, file descriptors (including but not limited to sockets) can be inherited, but only if the `CLOEXEC` flag is not set. Rust socket libraries always create sockets with the `CLOEXEC` flag set. This function sets or clears it using the `fcntl` system call.
 pub fn make_socket_inheritable(
 	socket: &Socket,
 	inheritable: bool,
 ) -> io::Result<sys::RawSocket> {
+	// TODO: Consider adding something that uses `CommandExt::pre_exec`, as described above, to make a socket inheritable after `fork` but before `exec`.
 	sys::make_socket_inheritable(socket, inheritable)
 }
 
