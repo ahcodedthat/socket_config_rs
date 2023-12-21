@@ -91,6 +91,13 @@ pub fn is_unix_socket(path: &Path) -> io::Result<bool> {
 	sys::is_unix_socket(path)
 }
 
+/// Gets a raw socket handle or file descriptor from the given socket-like object.
+///
+/// This is a simple portable abstraction over either `std::os::fd::AsRawFd::as_raw_fd` or `std::os::windows::io::AsRawSocket::as_raw_socket`, depending on the platform.
+pub fn as_raw_socket(socket: &impl sys::AsRawSocket) -> sys::RawSocket {
+	sys::as_raw_socket(socket)
+}
+
 #[test]
 fn test_is_unix_socket() {
 	let socket_path: PathBuf = TEST_SCRATCH.join("test1.socket");

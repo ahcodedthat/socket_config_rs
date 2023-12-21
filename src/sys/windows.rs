@@ -8,7 +8,7 @@ use std::{
 	io,
 	os::windows::{
 		fs::OpenOptionsExt,
-		io::{AsRawHandle, AsRawSocket, IntoRawSocket},
+		io::{AsRawHandle, IntoRawSocket},
 	},
 	path::Path,
 	sync::Once,
@@ -39,6 +39,8 @@ use windows_sys::Win32::{
 };
 
 pub use std::os::windows::io::{
+	AsRawSocket,
+	AsSocket,
 	BorrowedSocket,
 	OwnedSocket,
 	RawSocket,

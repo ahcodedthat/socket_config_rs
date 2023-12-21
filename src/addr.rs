@@ -17,6 +17,7 @@ use std::{
 
 #[cfg(doc)]
 use crate::{
+	as_raw_socket,
 	convert::AnyStdSocket,
 	SocketAppOptions,
 };
@@ -233,6 +234,35 @@ impl SocketAddr {
 			addr: addr.ip(),
 			port: Some(addr.port()),
 		}
+	}
+
+	/// Creates a new [`SocketAddr::Inherit`] with the given socket.
+	///
+	/// This method exists because `SocketAddr::Inherit` is marked with the `non_exhaustive` attribute, and therefore cannot be instantiated directly. If a future version of this library adds additional fields to the `Inherit` variant, then this method will assign reasonable default values to them.
+	///
+	/// To get a suitable raw socket handle or file descriptor from a socket-like object, use the [`as_raw_socket`] function.
+	pub fn new_inherit(socket: sys::RawSocket) -> Self {
+		Self::Inherit { socket }
+	}
+
+	/// Creates a new [`SocketAddr::InheritStdin`].
+	///
+	/// This method exists because `SocketAddr::InheritStdin` is marked with the `non_exhaustive` attribute, and therefore cannot be instantiated directly. If a future version of this library adds fields to the `InheritStdin` variant, then this method will assign reasonable default values to them.
+	pub fn new_inherit_stdin() -> Self {
+		Self::InheritStdin
+	}
+
+	/// Creates a new [`SocketAddr::SystemdNumeric`] with the given socket file descriptor number.
+	///
+	/// This method exists because `SocketAddr::SystemdNumeric` is marked with the `non_exhaustive` attribute, and therefore cannot be instantiated directly. If a future version of this library adds additional fields to the `SystemdNumeric` variant, then this method will assign reasonable default values to them.
+	///
+	///
+	/// # Availability
+	///
+	/// Unix-like platforms only.
+	#[cfg(not(windows))]
+	pub fn new_systemd_numeric(socket: sys::RawSocket) -> Self {
+		Self::SystemdNumeric { socket }
 	}
 }
 
