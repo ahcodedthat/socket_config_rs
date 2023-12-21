@@ -217,20 +217,6 @@ impl SocketAddr {
 		}
 	}
 
-	fn from_std_ip(addr: IpAddr) -> Self {
-		Self::Ip {
-			addr,
-			port: None,
-		}
-	}
-
-	fn from_std_ip_port(addr: std::net::SocketAddr) -> Self {
-		Self::Ip {
-			addr: addr.ip(),
-			port: Some(addr.port()),
-		}
-	}
-
 	/// Creates a new [`SocketAddr::Inherit`] with the given socket.
 	///
 	/// This method exists because `SocketAddr::Inherit` is marked with the `non_exhaustive` attribute, and therefore cannot be instantiated directly. If a future version of this library adds additional fields to the `Inherit` variant, then this method will assign reasonable default values to them.
@@ -410,37 +396,55 @@ impl Display for SocketAddr {
 
 impl From<IpAddr> for SocketAddr {
 	fn from(addr: IpAddr) -> Self {
-		Self::from_std_ip(addr)
+		Self::Ip {
+			addr,
+			port: None,
+		}
 	}
 }
 
 impl From<Ipv4Addr> for SocketAddr {
 	fn from(addr: Ipv4Addr) -> Self {
-		Self::from_std_ip(IpAddr::from(addr))
+		Self::Ip {
+			addr: addr.into(),
+			port: None,
+		}
 	}
 }
 
 impl From<Ipv6Addr> for SocketAddr {
 	fn from(addr: Ipv6Addr) -> Self {
-		Self::from_std_ip(IpAddr::from(addr))
+		Self::Ip {
+			addr: addr.into(),
+			port: None,
+		}
 	}
 }
 
 impl From<SocketAddrV4> for SocketAddr {
 	fn from(addr: SocketAddrV4) -> Self {
-		Self::from_std_ip_port(std::net::SocketAddr::from(addr))
+		Self::Ip {
+			addr: (*addr.ip()).into(),
+			port: Some(addr.port()),
+		}
 	}
 }
 
 impl From<SocketAddrV6> for SocketAddr {
 	fn from(addr: SocketAddrV6) -> Self {
-		Self::from_std_ip_port(std::net::SocketAddr::from(addr))
+		Self::Ip {
+			addr: (*addr.ip()).into(),
+			port: Some(addr.port()),
+		}
 	}
 }
 
 impl From<std::net::SocketAddr> for SocketAddr {
 	fn from(addr: std::net::SocketAddr) -> Self {
-		Self::from_std_ip_port(addr)
+		Self::Ip {
+			addr: addr.ip(),
+			port: Some(addr.port()),
+		}
 	}
 }
 
