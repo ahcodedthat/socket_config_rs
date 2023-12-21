@@ -19,6 +19,9 @@ use {
 	},
 };
 
+#[cfg(doc)]
+use crate::SocketAddr;
+
 pub(crate) fn inapplicable<T>(name: &'static str) -> Result<T, OpenSocketError> {
 	Err(OpenSocketError::InapplicableUserOption { name })
 }
@@ -46,6 +49,8 @@ pub(crate) fn check_inapplicable_bool(option: bool, name: &'static str) -> Resul
 /// If the `inheritable` parameter is true, the socket is made inheritable; otherwise, it is made non-inheritable.
 ///
 /// If this function is successful, the return value is the file descriptor or handle to pass to the child process.
+///
+/// For the child process to use the inherited socket, the child process must be informed of the socket's file descriptor or handle number, which is returned by this function. If the child process also uses this library, then you can use [`SocketAddr::new_inherit`] to create a suitable [`SocketAddr`], and pass that to the child process. See the `SocketAddr::new_inherit` documentation for an example.
 ///
 ///
 /// # Warning: Not Thread Safe
@@ -89,13 +94,6 @@ pub fn make_socket_inheritable(
 /// Any I/O error raised by the operating system call used to get the file's status (). If the error's [`std::io::Error::kind`] is [`std::io::ErrorKind::NotFound`], then there is no
 pub fn is_unix_socket(path: &Path) -> io::Result<bool> {
 	sys::is_unix_socket(path)
-}
-
-/// Gets a raw socket handle or file descriptor from the given socket-like object.
-///
-/// This is a simple portable abstraction over either `std::os::fd::AsRawFd::as_raw_fd` or `std::os::windows::io::AsRawSocket::as_raw_socket`, depending on the platform.
-pub fn as_raw_socket(socket: &impl sys::AsRawSocket) -> sys::RawSocket {
-	sys::as_raw_socket(socket)
 }
 
 #[test]

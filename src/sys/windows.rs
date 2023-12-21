@@ -8,7 +8,7 @@ use std::{
 	io,
 	os::windows::{
 		fs::OpenOptionsExt,
-		io::AsRawHandle,
+		io::{AsRawHandle, AsRawSocket},
 	},
 	path::Path,
 	sync::Once,
@@ -39,8 +39,6 @@ use windows_sys::Win32::{
 };
 
 pub use std::os::windows::io::{
-	AsRawSocket,
-	AsSocket,
 	BorrowedSocket,
 	OwnedSocket,
 	RawSocket,
@@ -195,8 +193,4 @@ pub(crate) fn get_socket_state(socket: &Socket) -> io::Result<SocketState> {
 	let is_listening = Some(is_listening_dword != 0);
 
 	Ok(SocketState { r#type, protocol, is_listening })
-}
-
-pub fn as_raw_socket(socket: &impl AsRawSocket) -> RawSocket {
-	socket.as_raw_socket()
 }

@@ -17,8 +17,8 @@ use std::{
 
 #[cfg(doc)]
 use crate::{
-	as_raw_socket,
 	convert::AnyStdSocket,
+	make_socket_inheritable,
 	SocketAppOptions,
 };
 
@@ -221,7 +221,35 @@ impl SocketAddr {
 	///
 	/// This method exists because `SocketAddr::Inherit` is marked with the `non_exhaustive` attribute, and therefore cannot be instantiated directly. If a future version of this library adds additional fields to the `Inherit` variant, then this method will assign reasonable default values to them.
 	///
-	/// To get a suitable raw socket handle or file descriptor from a socket-like object, use the [`as_raw_socket`] function.
+	///
+	/// # Example
+	///
+	/// When preparing a socket to be inherited by a child process, use this with [`make_socket_inheritable`] like so:
+	///
+	/// ```rust,no_run
+	/// # use socket_config::{make_socket_inheritable, SocketAddr};
+	/// # use std::process::Command;
+	/// #
+	/// # fn create_a_socket_somehow() -> std::io::Result<socket2::Socket> { unimplemented!() }
+	/// #
+	/// # fn run() -> std::io::Result<()> {
+	/// // Create the socket that is to be inherited.
+	/// let socket = create_a_socket_somehow()?;
+	///
+	/// // Make the socket inheritable, and prepare a `SocketAddr` for it.
+	/// let addr = SocketAddr::new_inherit(
+	/// 	make_socket_inheritable(&socket, true)?
+	/// );
+	///
+	/// // Then pass it to the child process.
+	/// Command::new("some_program")
+	/// .arg(addr.to_string())
+	/// .spawn()?;
+	/// #
+	/// # drop(addr);
+	/// # Ok(())
+	/// # }
+	/// ```
 	pub fn new_inherit(socket: sys::RawSocket) -> Self {
 		Self::Inherit { socket }
 	}
