@@ -45,7 +45,7 @@ use assert_matches::assert_matches;
 /// # Availability
 ///
 /// All platforms. Deserializing with `serde` requires the `serde` feature.
-#[derive(Clone, Debug, Eq, derive_more::From, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde_with::DeserializeFromStr, serde_with::SerializeDisplay))]
 #[non_exhaustive]
 pub enum SocketAddr {
@@ -64,7 +64,6 @@ pub enum SocketAddr {
 	///
 	/// If no port number is given, then [`SocketAppOptions::default_port`] is used as the port number instead. If that is also `None`, then an error occurs.
 	#[non_exhaustive]
-	#[from(ignore)]
 	Ip {
 		/// The IP address.
 		addr: std::net::IpAddr,
@@ -114,7 +113,6 @@ pub enum SocketAddr {
 	/// <code>fd:<var>n</var></code> or <code>socket:<var>n</var></code> where <code><var>n</var></code> is a file descriptor number or Windows `SOCKET` handle.
 	///
 	/// Note that the `fd:` and `socket:` prefixes are synonymous. Either one is accepted on any platform. When a `SocketAddr` is [`Display`]ed, the `socket:` prefix is used on Windows, and `fd:` is used on all other platforms.
-	#[from(ignore)]
 	#[non_exhaustive]
 	Inherit {
 		/// The socket's file descriptor number or Windows `SOCKET` handle.
@@ -145,7 +143,6 @@ pub enum SocketAddr {
 	/// # Syntax
 	///
 	/// The exact string `stdin`.
-	#[from(ignore)]
 	#[non_exhaustive]
 	InheritStdin,
 
@@ -167,7 +164,6 @@ pub enum SocketAddr {
 	///
 	/// <code>systemd:<var>n</var></code> where <code><var>n</var></code> is a file descriptor number for a socket inherited from systemd, starting at 3.
 	#[cfg(not(windows))]
-	#[from(ignore)]
 	#[non_exhaustive]
 	SystemdNumeric {
 		/// The socket's file descriptor number.
@@ -445,6 +441,12 @@ impl From<SocketAddrV6> for SocketAddr {
 impl From<std::net::SocketAddr> for SocketAddr {
 	fn from(addr: std::net::SocketAddr) -> Self {
 		Self::from_std_ip_port(addr)
+	}
+}
+
+impl From<PathBuf> for SocketAddr {
+	fn from(path: PathBuf) -> Self {
+		Self::Unix { path }
 	}
 }
 
