@@ -7,10 +7,7 @@ use std::{
 	env,
 	fs,
 	io,
-	os::{
-		fd::IntoRawFd,
-		unix::fs::FileTypeExt,
-	},
+	os::unix::fs::FileTypeExt,
 	path::Path,
 	process,
 };
@@ -107,8 +104,4 @@ pub(crate) fn get_socket_state(socket: &Socket) -> io::Result<SocketState> {
 
 pub fn as_raw_socket(socket: &impl AsRawSocket) -> RawSocket {
 	socket.as_raw_fd()
-}
-
-pub fn into_raw_socket(socket: impl IntoRawFd) -> RawSocket {
-	socket.into_raw_fd()
 }

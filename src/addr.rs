@@ -34,7 +34,6 @@ use assert_matches::assert_matches;
 /// * From a string, using [`str::parse`] or [`FromStr::from_str`]. The documentation for each variant has a “Syntax” section explaining the expected syntax.
 /// * [`From`] various standard library socket address types.
 /// * `From` [`PathBuf`], which produces [`SocketAddr::Unix`].
-/// * `From` a borrowed or owned raw socket type with `'static` lifetime, such as `std::os::fd::BorrowedFd<'static>` or `std::os::windows::io::OwnedSocket`, which produces [`SocketAddr::Inherit`].
 /// * [`TryFrom`] `std::os::unix::net::SocketAddr` (Unix-like platforms only), which produces [`SocketAddr::Unix`] if the input address has a pathname, or fails if the input address is unnamed or (Linux only) has an abstract name.
 #[cfg_attr(feature = "serde", doc = r#"
 * From a serialization format supported by [`serde`]. The serialized representation is expected to be a string, also using the syntax described in the aforementioned “Syntax” sections.
@@ -446,22 +445,6 @@ impl From<SocketAddrV6> for SocketAddr {
 impl From<std::net::SocketAddr> for SocketAddr {
 	fn from(addr: std::net::SocketAddr) -> Self {
 		Self::from_std_ip_port(addr)
-	}
-}
-
-impl From<sys::BorrowedSocket<'static>> for SocketAddr {
-	fn from(socket: sys::BorrowedSocket<'static>) -> Self {
-		Self::Inherit {
-			socket: sys::as_raw_socket(&socket),
-		}
-	}
-}
-
-impl From<sys::OwnedSocket> for SocketAddr {
-	fn from(socket: sys::OwnedSocket) -> Self {
-		Self::Inherit {
-			socket: sys::into_raw_socket(socket),
-		}
 	}
 }
 
