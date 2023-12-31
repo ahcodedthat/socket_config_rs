@@ -29,9 +29,24 @@ pub struct SocketUserOptions {
 	///
 	/// This option applies to non-inherited Unix-domain sockets only, and has no effect on other kinds of sockets.
 	///
+	/// If this option is used, and the socket already exists, then there will be an error. The default is to automatically delete any existing socket.
+	///
+	///
+	/// # Caveats
+	///
+	/// If this option is not used, then the following caveats apply:
+	///
+	/// There will be an attempt to check if the file at the designated socket path really is a Unix-domain socket, before deleting it. This check is imperfect, however; it is possible for a Unix-domain socket to be replaced with some other kind of file after the check but before the deletion (a [TOCTTOU] issue).
+	///
+	/// There will *not* be an attempt to check if the existing socket is still in use. If it is in use, then whichever process is using it will continue running, but it will be “detached” from the socket, and will not receive any new packets or connections over the socket. (Already-established connections are not affected.)
+	///
+	///
 	/// # Availability
 	///
 	/// All platforms.
+	///
+	///
+	/// [TOCTTOU]: https://en.wikipedia.org/wiki/Time-of-check_to_time-of-use
 	#[cfg_attr(feature = "clap", arg(long))]
 	pub unix_socket_no_unlink: bool,
 

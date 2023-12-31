@@ -20,6 +20,7 @@ use crate::{
 	convert::AnyStdSocket,
 	make_socket_inheritable,
 	SocketAppOptions,
+	SocketUserOptions,
 };
 
 #[cfg(all(feature = "serde", test))]
@@ -188,10 +189,32 @@ impl SocketAddr {
 
 	/// Deletes the indicated path-based Unix-domain socket, if applicable.
 	///
-	/// This method does nothing if `self` is not [`SocketAddr::Unix`], or if there is not a Unix-domain socket at `self.path`.
+	/// Specifically, this method does the following:
 	///
-	/// This method attempts to check if the file at `self.path` really is a Unix-domain socket before deleting it. This check is imperfect, however; it is possible for a Unix-domain socket to be replaced with some other kind of file after the check but before the deletion (a [TOCTTOU] issue).
+	/// 1. Check if `self` is [`SocketAddr::Unix`].
+	/// 2. If so, check if there is a Unix-domain socket at [`self.path`][SocketAddr::Unix::path].
+	/// 3. If so, delete the socket.
 	///
+	/// It is not normally necessary to call this method. Unless the user sets [`SocketUserOptions::unix_socket_no_unlink`] to true, stale sockets are automatically deleted when calling [`open`][crate::open()]. This is the conventional way to handle the deletion of stale Unix-domain sockets; see, for example, [BSD syslogd].
+	///
+	///
+	/// # Caveats
+	///
+	/// The caveats for [`SocketUserOptions::unix_socket_no_unlink`] also apply to this method, namely:
+	///
+	/// The check performed in step 2 (see above) is imperfect; it is possible for a Unix-domain socket to be replaced with some other kind of file after the check but before the deletion (a [TOCTTOU] issue).
+	///
+	/// There will *not* be an attempt to check if the socket is still in use. If it is in use, then whichever process is using it will continue running, but it will be “detached” from the socket, and will not receive any new packets or connections over the socket. (Already-established connections are not affected.)
+	///
+	///
+	/// # Errors
+	///
+	/// Returns an error if there is an I/O error checking for or deleting the socket.
+	///
+	/// It is not an error if the socket is not found, or if there is something other than a socket at `self.path` (such as a regular file). In that case, this method will return successfully without deleting anything.
+	///
+	///
+	/// [BSD syslogd]: https://svnweb.freebsd.org/base/head/usr.sbin/syslogd/syslogd.c?revision=291328&view=markup#l565
 	/// [TOCTTOU]: https://en.wikipedia.org/wiki/Time-of-check_to_time-of-use
 	pub fn cleanup(&self) -> Result<(), CleanupSocketError> {
 		if let Self::Unix { path, .. } = self {
