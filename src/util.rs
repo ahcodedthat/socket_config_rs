@@ -160,14 +160,23 @@ pub(crate) fn is_socket_probably_tcp(
 		return protocol == socket2::Protocol::TCP;
 	}
 
-	#[cfg(any(
-		target_os = "android",
-		target_os = "freebsd",
-		target_os = "fuchsia",
-		target_os = "linux",
-	))]
-	if let Ok(Some(protocol)) = socket.protocol() {
-		return protocol == socket2::Protocol::TCP;
+	cfg_if::cfg_if! {
+		// On a few platforms, the socket can be directly asked what protocol it's using.
+		if #[cfg(any(
+			target_os = "android",
+			target_os = "freebsd",
+			target_os = "fuchsia",
+			target_os = "linux",
+		))] {
+			if let Ok(Some(protocol)) = socket.protocol() {
+				return protocol == socket2::Protocol::TCP;
+			}
+		}
+		// On all others, we're going to have to infer the protocol…
+		else {
+			// …which means we aren't actually going to use the socket itself, so just suppress the unused-variable warning.
+			let _ = socket;
+		}
 	}
 
 	app_options.r#type == socket2::Type::STREAM && (local_addr.is_ipv4() || local_addr.is_ipv6())
