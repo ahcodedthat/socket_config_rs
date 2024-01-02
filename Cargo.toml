@@ -4,6 +4,7 @@ categories = ["command-line-interface", "config", "network-programming"]
 description = "Set up sockets according to command line option or configuration file"
 documentation = "https://docs.rs/socket_config"
 edition = "2021"
+homepage = "https://github.com/ahcodedthat/socket_config_rs"
 include = ["/examples", "/src", "/tests"]
 keywords = ["config", "network", "socket", "socket-activation", "systemd"]
 license = "MIT"
