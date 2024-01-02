@@ -1,0 +1,24 @@
+#!/bin/sh -e
+cd "$(dirname "$0")"
+. ./_functions.sh
+cd ..
+
+excluded_features_for_platform () {
+	local target_os="$(rustc --target="$1" --print=cfg | grep '^target_os=' | sed -E 's/^[^=]+="([^"]+)"$/\1/g')"
+
+	case $target_os in
+		solaris|fuchsia)
+			# Tokio doesn't work on these platforms, so exclude it.
+			echo tls-listener,tokio
+			;;
+
+		*)
+			# On all other platforms, enable all features.
+			;;
+	esac
+}
+
+for target in $all_targets; do
+	echo "*** Checking target $target ***" >&2
+	cargo hack check --feature-powerset --exclude-features="$(excluded_features_for_platform "$target")" --all-targets --target $target "$@"
+done

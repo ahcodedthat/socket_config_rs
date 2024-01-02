@@ -1,0 +1,5 @@
+#!/bin/sh -e
+cd "$(dirname "$0")"
+. ./_functions.sh
+rustup target add $all_targets
+cargo install cargo-hack
