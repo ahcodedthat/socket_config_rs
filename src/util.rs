@@ -1,6 +1,5 @@
 use crate::{
 	errors::OpenSocketError,
-	SocketAppOptions,
 	sys,
 };
 use socket2::Socket;
@@ -8,6 +7,9 @@ use std::{
 	io,
 	path::Path,
 };
+
+#[cfg(not(windows))]
+use crate::SocketAppOptions;
 
 #[cfg(test)]
 use {

@@ -16,8 +16,11 @@ mod parse_common {
 	use libc::{gid_t, mode_t, uid_t};
 	use nix::{
 		sys::stat::Mode,
-		unistd::{Gid, Group, Uid, User},
+		unistd::{Gid, Uid},
 	};
+
+	#[cfg(not(target_os = "redox"))]
+	use nix::unistd::{Group, User};
 
 	#[derive(Debug, thiserror::Error)]
 	#[error("unrecognized character in `unix_socket_permissions` (only the letters `u`, `g`, and `o`, or an octal mode number, are recognized)")]
@@ -80,6 +83,8 @@ mod parse_common {
 		pub(super) fn to_uid(self) -> Result<Uid, UnixPrincipalLookupError> {
 			match self {
 				Self::Id(id) => Ok(Uid::from_raw(id)),
+
+				#[cfg(not(target_os = "redox"))]
 				Self::Name(name) => match User::from_name(name) {
 					Ok(Some(user)) => Ok(user.uid),
 					Ok(None) => Err(UnixPrincipalLookupError::NotFound {
@@ -90,6 +95,11 @@ mod parse_common {
 						error,
 					}),
 				},
+
+				#[cfg(target_os = "redox")]
+				Self::Name(_) => Err(UnixPrincipalLookupError::NotSupported {
+					principal_kind: UnixPrincipalKind::User,
+				}),
 			}
 		}
 	}
@@ -98,6 +108,8 @@ mod parse_common {
 		pub(super) fn to_gid(self) -> Result<Gid, UnixPrincipalLookupError> {
 			match self {
 				Self::Id(id) => Ok(Gid::from_raw(id)),
+
+				#[cfg(not(target_os = "redox"))]
 				Self::Name(name) => match Group::from_name(name) {
 					Ok(Some(group)) => Ok(group.gid),
 					Ok(None) => Err(UnixPrincipalLookupError::NotFound {
@@ -108,6 +120,11 @@ mod parse_common {
 						error,
 					}),
 				},
+
+				#[cfg(target_os = "redox")]
+				Self::Name(_) => Err(UnixPrincipalLookupError::NotSupported {
+					principal_kind: UnixPrincipalKind::Group,
+				}),
 			}
 		}
 	}
@@ -123,11 +140,19 @@ mod parse_common {
 
 	#[derive(Debug, thiserror::Error)]
 	pub enum UnixPrincipalLookupError {
+		#[cfg(not(target_os = "redox"))]
 		#[error("{principal_kind} not found")]
 		NotFound {
 			principal_kind: UnixPrincipalKind,
 		},
 
+		#[cfg(target_os = "redox")]
+		#[error("looking up a {principal_kind} by name is not supported on this platform; please use a numeric ID")]
+		NotSupported {
+			principal_kind: UnixPrincipalKind,
+		},
+
+		#[cfg(not(target_os = "redox"))]
 		#[error("error looking up {principal_kind} ID: {error}")]
 		Error {
 			principal_kind: UnixPrincipalKind,
@@ -139,12 +164,18 @@ mod parse_common {
 
 	#[test]
 	fn test_principal_parse_lookup() {
+		use cfg_if::cfg_if;
 		use super::*;
 
 		let my_uid = Uid::current();
-		let my_user = User::from_uid(my_uid).unwrap().unwrap().name;
 		let my_gid = Gid::current();
-		let my_group = Group::from_gid(my_gid).unwrap().unwrap().name;
+
+		cfg_if! {
+			if #[cfg(not(target_os = "redox"))] {
+				let my_user = User::from_uid(my_uid).unwrap().unwrap().name;
+				let my_group = Group::from_gid(my_gid).unwrap().unwrap().name;
+			}
+		}
 
 		#[cfg(feature = "clap")] {
 			use assert_matches::assert_matches;
@@ -155,33 +186,52 @@ mod parse_common {
 			);
 
 			assert_eq!(
-				parse_uid(&my_user).unwrap(),
-				my_uid,
-			);
-
-			assert_eq!(
 				parse_gid(&format!("{my_gid}")).unwrap(),
 				my_gid,
 			);
 
-			assert_eq!(
-				parse_gid(&my_group).unwrap(),
-				my_gid,
-			);
+			cfg_if! {
+				if #[cfg(target_os = "redox")] {
+					assert_matches!(
+						parse_uid("<imaginary user, looking up for testing, please ignore>"),
+						Err(UnixPrincipalLookupError::NotSupported {
+							principal_kind: UnixPrincipalKind::User,
+						})
+					);
 
-			assert_matches!(
-				parse_uid("<imaginary user, looking up for testing, please ignore>"),
-				Err(UnixPrincipalLookupError::NotFound {
-					principal_kind: UnixPrincipalKind::User,
-				})
-			);
+					assert_matches!(
+						parse_gid("<imaginary group, looking up for testing, please ignore>"),
+						Err(UnixPrincipalLookupError::NotSupported {
+							principal_kind: UnixPrincipalKind::Group,
+						})
+					);
+				}
+				else {
+					assert_eq!(
+						parse_uid(&my_user).unwrap(),
+						my_uid,
+					);
 
-			assert_matches!(
-				parse_gid("<imaginary group, looking up for testing, please ignore>"),
-				Err(UnixPrincipalLookupError::NotFound {
-					principal_kind: UnixPrincipalKind::Group,
-				})
-			);
+					assert_eq!(
+						parse_gid(&my_group).unwrap(),
+						my_gid,
+					);
+
+					assert_matches!(
+						parse_uid("<imaginary user, looking up for testing, please ignore>"),
+						Err(UnixPrincipalLookupError::NotFound {
+							principal_kind: UnixPrincipalKind::User,
+						})
+					);
+
+					assert_matches!(
+						parse_gid("<imaginary group, looking up for testing, please ignore>"),
+						Err(UnixPrincipalLookupError::NotFound {
+							principal_kind: UnixPrincipalKind::Group,
+						})
+					);
+				}
+			}
 		}
 
 		#[cfg(feature = "serde")] {
@@ -213,14 +263,16 @@ mod parse_common {
 				);
 			}
 
-			assert_eq!(
-				serde_json::from_str::<UserAndGroup>(&format!(r#"{{
-					"user": "{my_user}",
-					"group": "{my_group}"
-				}}"#)).unwrap(),
+			#[cfg(not(target_os = "redox"))] {
+				assert_eq!(
+					serde_json::from_str::<UserAndGroup>(&format!(r#"{{
+						"user": "{my_user}",
+						"group": "{my_group}"
+					}}"#)).unwrap(),
 
-				de,
-			);
+					de,
+				);
+			}
 		}
 	}
 }
@@ -507,7 +559,7 @@ pub fn apply(
 		}
 
 		if let Some(mode) = options.unix_socket_permissions {
-			let permissions = fs::Permissions::from_mode(mode.bits());
+			let permissions = fs::Permissions::from_mode(mode.bits() as _);
 
 			fs::set_permissions(socket_path, permissions)
 			.map_err(|error| OpenSocketError::SetPermissions { error })?;
