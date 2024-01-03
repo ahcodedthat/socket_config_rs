@@ -53,5 +53,9 @@ serde_json = "1.0.105"
 tokio = { version = "1.32.0", features = ["io-util", "macros", "net", "rt"] }
 
 [[example]]
+name = "chargen_once"
+required-features = ["clap"]
+
+[[example]]
 name = "echo_incr"
 required-features = ["clap", "tokio"]
