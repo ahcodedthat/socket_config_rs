@@ -40,7 +40,7 @@ use assert_matches::assert_matches;
 * From a serialization format supported by [`serde`]. The serialized representation is expected to be a string, also using the syntax described in the aforementioned “Syntax” sections.
 "#)]
 ///
-/// The [`Default`] for this type is the IPv4 address 127.0.0.1, port zero.
+/// The [`Default`] for this type is the IPv4 address 127.0.0.1, with no port specified.
 ///
 ///
 /// # Availability
