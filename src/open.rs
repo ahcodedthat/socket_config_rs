@@ -13,7 +13,33 @@ use std::{
 	path::Path,
 };
 
-/// Opens a socket (or claims an inherited one), according to the given address and options.
+#[cfg(doc)]
+use crate::convert::AnyStdSocket;
+
+#[cfg(all(doc, feature = "tokio"))]
+use crate::convert::AnyTokioListener;
+
+/// `socket_config` entry point. Opens a socket (or claims an inherited one), according to the given address and options.
+///
+/// Three parameters are needed:
+///
+/// 1. A [`SocketAddr`], indicating which address to bind the socket to, or which inherited socket to use. This is taken from the user, typically from a command-line parameter or configuration file.
+/// 2. [`SocketAppOptions`], which sets things like [socket type][SocketAppOptions::type] (such as stream or datagram) and [default port number][SocketAppOptions::default_port]. These are hard-coded into your application.
+/// 3. [`SocketUserOptions`], which sets things like [Unix socket permissions][SocketUserOptions::unix_socket_permissions] and [whether to allow IPv4 connections to an IPv6 socket][SocketUserOptions::ip_socket_v6_only]. These are also taken from the user, same as the `SocketAddr`.
+///
+/// The return value is a [`socket2::Socket`]. This can be used several ways:
+///
+/// * Directly, for blocking I/O. (When doing this, be sure to retry operations that fail with [`std::io::ErrorKind::Interrupted`]; unlike the Rust standard library, the methods of `socket2::Socket` do not automatically retry.)
+#[cfg_attr(feature = "tokio", doc = r#"
+* Converted to [`AnyTokioListener`]. This accepts connections on a TCP or Unix-domain listening socket using [`tokio`] non-blocking I/O."#)]
+/// * Converted to a standard library socket type like [`std::net::TcpListener`]. To do that, first convert it to [`AnyStdSocket`] using its `TryFrom<socket2::Socket>` implementation, and then extract the intended standard library socket type from it.
+///
+///
+/// # Inherited sockets
+///
+/// This function duplicates inherited sockets (`dup` on Unix-like platforms; `WSADuplicateSocket` on Windows), rather than directly wrapping them in `Socket`. The original inherited socket is not closed, even when the returned `Socket` is dropped.
+///
+/// That way, it is possible to open, close, and reopen the same `SocketAddr`, regardless of whether it is inherited. The original inherited socket is left open, and will simply be duplicated again.
 ///
 ///
 /// # Example
@@ -32,8 +58,9 @@ use std::{
 /// # user_options = unimplemented!();
 ///
 /// // The application options are hard-coded into your application. In this
-/// // example, we'll just use the defaults.
-/// let app_options = socket_config::SocketAppOptions::new(socket2::Type::STREAM);
+/// // example, we'll set a default port number.
+/// let mut app_options = socket_config::SocketAppOptions::new(socket2::Type::STREAM);
+/// app_options.default_port = Some(27910);
 ///
 /// // Open the listening socket.
 /// let listen_socket: Socket = socket_config::open(
@@ -43,7 +70,17 @@ use std::{
 /// )?;
 ///
 /// // Accept a connection.
-/// let (mut connected_socket, _): (Socket, _) = listen_socket.accept()?;
+/// let (mut connected_socket, client_addr): (Socket, socket2::SockAddr) = loop {
+/// 	let result = listen_socket.accept();
+///
+/// 	// On some platforms, `accept` can fail due to the system call being
+/// 	// interrupted. When it does, just try again.
+/// 	if matches!(result, Err(e) if e.kind() == std::io::ErrorKind::Interrupted) {
+/// 		continue;
+/// 	}
+///
+/// 	break result
+/// }?;
 ///
 /// // Say hello.
 /// connected_socket.write_all(b"Hello, world!\n")?;
@@ -51,13 +88,6 @@ use std::{
 /// # Ok(())
 /// # }
 /// ```
-///
-///
-/// # Inherited sockets
-///
-/// This function duplicates inherited sockets (`dup` on Unix-like platforms; `WSADuplicateSocket` on Windows), rather than directly wrapping them in `Socket`. The original inherited socket is not closed, even when the returned `Socket` is dropped.
-///
-/// That way, it is possible to open, close, and reopen the same `SocketAddr`, regardless of whether it is inherited. The original inherited socket is left open, and will simply be duplicated again.
 pub fn open(
 	address: &SocketAddr,
 	app_options: &SocketAppOptions,

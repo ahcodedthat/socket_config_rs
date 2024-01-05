@@ -11,7 +11,8 @@ use socket_config::{
 use socket2::Socket;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-/// A simple echo server that listens on a stream socket and echoes back all bytes to clients, incremented by one.
+/// A simple echo server that listens on a stream socket and echoes back all bytes to clients,
+/// incremented by one.
 #[derive(clap::Parser)]
 struct CommandLine {
 	#[command(flatten)]
@@ -25,7 +26,10 @@ async fn main() -> anyhow::Result<()> {
 	// Parse the command line options.
 	let command_line = <CommandLine as clap::Parser>::parse();
 
-	// Set up the `SocketAppOptions`. In this example, we'll use the defaults, except for an explicit default port of 27910.
+	// Set up the `SocketAppOptions`.
+	//
+	// In this example, we'll set a default port of 27910, and leave the other
+	// options alone.
 	let mut socket_app_options = SocketAppOptions::new(socket2::Type::STREAM);
 	socket_app_options.default_port = Some(27910);
 

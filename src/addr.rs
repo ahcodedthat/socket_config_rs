@@ -52,10 +52,6 @@ use assert_matches::assert_matches;
 pub enum SocketAddr {
 	/// An Internet (IPv4 or IPv6) socket address.
 	///
-	/// # Availability
-	///
-	/// All platforms.
-	///
 	/// # Syntax
 	///
 	/// * `1.2.3.4`, an IPv4 address without port number
@@ -63,7 +59,11 @@ pub enum SocketAddr {
 	/// * `1::2`, a non-bracketed IPv6 address without port number
 	/// * `[1::2]:3`, a bracketed IPv6 address with port number
 	///
-	/// If no port number is given, then [`SocketAppOptions::default_port`] is used as the port number instead. If that is also `None`, then an error occurs.
+	/// If no port number is given, then [`SocketAppOptions::default_port`] is used as the port number instead. If that is also `None`, then [`open`][crate::open()] will raise an error.
+	///
+	/// # Availability
+	///
+	/// All platforms.
 	#[non_exhaustive]
 	Ip {
 		/// The IP address.
@@ -74,6 +74,13 @@ pub enum SocketAddr {
 	},
 
 	/// A Unix-domain socket at the given path.
+	///
+	/// # Syntax
+	///
+	/// * A path starting with `\`, `/`, `.\`, or `./`
+	/// * A path starting with <code><var>X</var>:&Backslash;</code> (where <code><var>X</var></code> is a single ASCII letter, `A` through `Z`, case insensitive)
+	///
+	/// Note that all of these patterns are recognized on all platforms as indicating a Unix-domain socket. That includes the <code><var>X</var>:&Backslash;</code> pattern, which is somewhat surprisingly interpreted as a *relative* path on non-Windows platforms.
 	///
 	/// # Availability
 	///
@@ -86,13 +93,6 @@ pub enum SocketAddr {
 	/// Some platforms, namely Linux and Windows, support Unix-domain sockets whose name is in an “abstract namespace” instead of the file system. That is not currently supported by this library.
 	///
 	/// Unix-domain socket names and paths are severely limited in length. The maximum length is platform-defined.
-	///
-	/// # Syntax
-	///
-	/// * A path starting with `\`, `/`, `.\`, or `./`
-	/// * A path starting with <code><var>X</var>:&Backslash;</code> (where <code><var>X</var></code> is a single ASCII letter, `A` through `Z`, case insensitive)
-	///
-	/// Note that all of these patterns are recognized on all platforms as indicating a Unix-domain socket. That includes the <code><var>X</var>:&Backslash;</code> pattern, which is somewhat surprisingly interpreted as a *relative* path on non-Windows platforms.
 	#[non_exhaustive]
 	Unix {
 		/// The path to the socket.
@@ -103,17 +103,17 @@ pub enum SocketAddr {
 	///
 	/// Only sockets that have been made inheritable can be inherited. When spawning a child process from a Rust program (such as an integration test) that is to inherit a socket from the parent process, use the [`make_socket_inheritable`][crate::make_socket_inheritable()] function to make it inheritable.
 	///
-	/// # Availability
-	///
-	/// All platforms.
-	///
-	/// Socket inheritance on Windows only works if there are no [Layered Service Providers](https://en.wikipedia.org/wiki/Layered_Service_Provider) (LSPs) installed. In the past, LSPs were commonly used by Windows security software to inspect network traffic. LSPs were replaced by the [Windows Filtering Platform](https://en.wikipedia.org/wiki/Windows_Filtering_Platform) in Windows Vista and have been deprecated since Windows Server 2012, though as of 2022 they are still supported for backward compatibility reasons. Therefore, inherited sockets are likely but not guaranteed to work on modern Windows systems, and unlikely to work on legacy Windows systems.
-	///
 	/// # Syntax
 	///
 	/// <code>fd:<var>n</var></code> or <code>socket:<var>n</var></code> where <code><var>n</var></code> is a file descriptor number or Windows `SOCKET` handle.
 	///
 	/// Note that the `fd:` and `socket:` prefixes are synonymous. Either one is accepted on any platform. When a `SocketAddr` is [`Display`]ed, the `socket:` prefix is used on Windows, and `fd:` is used on all other platforms.
+	///
+	/// # Availability
+	///
+	/// All platforms.
+	///
+	/// Socket inheritance on Windows only works if there are no [Layered Service Providers](https://en.wikipedia.org/wiki/Layered_Service_Provider) (LSPs) installed. In the past, LSPs were commonly used by Windows security software to inspect network traffic. LSPs were replaced by the [Windows Filtering Platform](https://en.wikipedia.org/wiki/Windows_Filtering_Platform) in Windows Vista and have been deprecated since Windows Server 2012, though as of 2022 they are still supported for backward compatibility reasons. Therefore, inherited sockets are likely but not guaranteed to work on modern Windows systems, and unlikely to work on legacy Windows systems.
 	#[non_exhaustive]
 	Inherit {
 		/// The socket's file descriptor number or Windows `SOCKET` handle.
@@ -135,15 +135,15 @@ pub enum SocketAddr {
 	/// * On Windows, <code>[GetStdHandle](https://learn.microsoft.com/en-us/windows/console/getstdhandle)(STD_INPUT_HANDLE)</code> is called to obtain the `SOCKET` handle.
 	/// * On all other platforms, file descriptor number 0 is used.
 	///
+	/// # Syntax
+	///
+	/// The exact string `stdin`.
+	///
 	/// # Availability
 	///
 	/// All platforms.
 	///
 	/// Availability notes for the `Inherit` variant also apply to this variant.
-	///
-	/// # Syntax
-	///
-	/// The exact string `stdin`.
 	#[non_exhaustive]
 	InheritStdin,
 
@@ -153,6 +153,10 @@ pub enum SocketAddr {
 	///
 	/// Systemd socket units used with this must be in `Accept=no` mode.
 	///
+	/// # Syntax
+	///
+	/// <code>systemd:<var>n</var></code> where <code><var>n</var></code> is a file descriptor number for a socket inherited from systemd, starting at 3.
+	///
 	/// # Availability
 	///
 	/// Unix-like platforms only.
@@ -160,10 +164,6 @@ pub enum SocketAddr {
 	/// Note that, although systemd is Linux-specific, the systemd socket activation protocol is not, and other implementations for other platforms may exist. The socket activation protocol can be implemented on any platform with Unix-like inheritable file descriptors and environment variables.
 	///
 	/// The socket activation protocol is *not* possible to implement on Windows, because the protocol requires that the first socket is numbered 3, the second socket is numbered 4, and so on. Windows `SOCKET` handles' numeric values cannot be controlled like this. This socket address mode is therefore unavailable on Windows, and attempting to use it always results in an error.
-	///
-	/// # Syntax
-	///
-	/// <code>systemd:<var>n</var></code> where <code><var>n</var></code> is a file descriptor number for a socket inherited from systemd, starting at 3.
 	#[cfg(not(windows))]
 	#[non_exhaustive]
 	SystemdNumeric {

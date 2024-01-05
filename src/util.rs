@@ -22,7 +22,7 @@ use {
 };
 
 #[cfg(doc)]
-use crate::SocketAddr;
+use crate::{SocketAddr, SocketUserOptions};
 
 pub(crate) fn inapplicable<T>(name: &'static str) -> Result<T, OpenSocketError> {
 	Err(OpenSocketError::InapplicableUserOption { name })
@@ -91,9 +91,19 @@ pub fn make_socket_inheritable(
 /// Unix-like platforms and Windows have very different ways of checking if a file is a Unix-domain socket. This utility function abstracts over those differences.
 ///
 ///
+/// # Caveat
+///
+/// This function suffers from the [TOCTTOU] problem. Although it will determine whether the file at `path` is a Unix-domain socket, there is no guarantee that the file will *still* be a Unix-domain socket in the future, nor that it will be the *same* Unix-domain socket in the future.
+///
+/// If, for example, this function is used to decide whether to delete a Unix-domain socket (which [`SocketAddr::cleanup`] and [`SocketUserOptions::unix_socket_no_unlink`] do), then the socket might be replaced with some other file after the check but before the deletion, and then *that* will be deleted instead.
+///
+///
 /// # Errors
 ///
-/// Any I/O error raised by the operating system call used to get the file's status (). If the error's [`std::io::Error::kind`] is [`std::io::ErrorKind::NotFound`], then there is no
+/// This function can fail due to any I/O error raised by the operating system call used to get the file's status (`CreateFile` and `GetFileInformationByHandleEx` on Windows; `lstat` on other platforms). That includes if there is no such file at all, which will result in an error with [`std::io::ErrorKind::NotFound`].
+///
+///
+/// [TOCTTOU]: https://en.wikipedia.org/wiki/Time-of-check_to_time-of-use
 pub fn is_unix_socket(path: &Path) -> io::Result<bool> {
 	sys::is_unix_socket(path)
 }
