@@ -11,7 +11,7 @@ license = "MIT"
 name = "socket_config"
 repository = "https://github.com/ahcodedthat/socket_config_rs"
 rust-version = "1.70"
-version = "0.1.1"
+version = "0.1.2"
 
 [package.metadata."docs.rs"]
 all-features = true
